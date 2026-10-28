@@ -1,0 +1,6 @@
+{
+  "name": "HelpDesk TI Lima Metropolitana - Entornos VMware",
+  "description": "Sistema de Help Desk automatizado para instituciones educativas de Lima Metropolitana con pruebas de compatibilidad de entornos virtuales VMware y selector de prioridad IT.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
