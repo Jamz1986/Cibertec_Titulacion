@@ -3,6 +3,14 @@ import cors from 'cors';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
+import { exec } from 'child_process';
+import util from 'util';
+
+const require = createRequire(import.meta.url);
+const { ZipArchive } = require('archiver');
+
+const execPromise = util.promisify(exec);
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -87,7 +95,7 @@ function mapZabbixSeverityToPriority(severity?: string): 'low' | 'medium' | 'hig
 // ==========================================
 
 // Preflight OPTIONS for CORS
-app.options('/api/webhooks/zabbix', (_req, res) => {
+app.options(['/api/webhooks/zabbix', '/api/webhooks/zabbix/'], (_req, res) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
@@ -95,7 +103,7 @@ app.options('/api/webhooks/zabbix', (_req, res) => {
 });
 
 // GET /api/webhooks/zabbix (informational & health for browser tests)
-app.get('/api/webhooks/zabbix', (_req, res) => {
+app.get(['/api/webhooks/zabbix', '/api/webhooks/zabbix/'], (_req, res) => {
   res.json({
     status: 'online',
     service: 'EduDesk - Receptor Webhook Zabbix Server 7.0 LTS',
@@ -108,7 +116,7 @@ app.get('/api/webhooks/zabbix', (_req, res) => {
 });
 
 // POST /api/webhooks/zabbix (Core Webhook Receiver from Zabbix Server)
-app.post('/api/webhooks/zabbix', (req, res) => {
+app.post(['/api/webhooks/zabbix', '/api/webhooks/zabbix/'], (req, res) => {
   try {
     let payload = req.body;
 
@@ -227,6 +235,77 @@ app.get('/api/health', (_req, res) => {
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
   });
+});
+
+// Descargar todo el código del proyecto en un archivo .ZIP directo
+app.get('/api/download-zip', (_req, res) => {
+  try {
+    res.attachment('Cibertec_Titulacion_Zabbix.zip');
+    const archive = new ZipArchive({ zlib: { level: 9 } });
+
+    archive.on('error', (err: any) => {
+      console.error('[Archiver Error]:', err);
+      res.status(500).send({ error: err.message });
+    });
+
+    archive.pipe(res);
+
+    archive.glob('**/*', {
+      cwd: __dirname,
+      ignore: ['node_modules/**', 'dist/**', '.git/**', '.vercel/**'],
+      dot: true,
+    });
+
+    archive.finalize();
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Realizar Push directo a GitHub desde la aplicación
+app.post('/api/github/push', async (req, res) => {
+  try {
+    const { token, repoUrl = 'https://github.com/Jamz1986/Cibertec_Titulacion.git', commitMsg = 'feat: actualizar endpoints Zabbix webhook y Vercel serverless' } = req.body;
+
+    if (!token || !String(token).trim()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Se requiere un GitHub Personal Access Token con permisos de "repo".'
+      });
+    }
+
+    const cleanToken = String(token).trim();
+    const cleanRepo = repoUrl.replace('https://github.com/', '').replace('.git', '');
+    const authUrl = `https://${cleanToken}@github.com/${cleanRepo}.git`;
+
+    console.log('[Git Push API] Starting git push to', cleanRepo);
+
+    await execPromise('git init', { cwd: __dirname });
+    await execPromise('git config user.name "Jamz1986"', { cwd: __dirname });
+    await execPromise('git config user.email "l3puma1986@gmail.com"', { cwd: __dirname });
+    await execPromise('git branch -M main', { cwd: __dirname });
+    await execPromise('git add -A', { cwd: __dirname });
+
+    try {
+      await execPromise(`git commit -m "${commitMsg.replace(/"/g, '\\"')}"`, { cwd: __dirname });
+    } catch {
+      // nothing new to commit is fine
+    }
+
+    await execPromise(`git push "${authUrl}" main --force`, { cwd: __dirname });
+
+    console.log('[Git Push API] Git push successful!');
+    return res.json({
+      success: true,
+      message: '¡Código subido exitosamente a GitHub! Vercel iniciará el despliegue automático en segundos.'
+    });
+  } catch (err: any) {
+    console.error('[Git Push API Error]:', err);
+    return res.status(500).json({
+      success: false,
+      error: err.stderr || err.message || 'Error al comunicarse con GitHub. Verifique que el Token tenga permisos "repo".'
+    });
+  }
 });
 
 // ==========================================
