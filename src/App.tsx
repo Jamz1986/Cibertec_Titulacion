@@ -76,6 +76,49 @@ export default function App() {
     }
   }, [currentUser?.rol]);
 
+  // Sincronización en tiempo real con el backend de Webhooks de Zabbix
+  React.useEffect(() => {
+    const fetchRecentWebhookTickets = async () => {
+      try {
+        const res = await fetch('/api/tickets/recent');
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.success && Array.isArray(data.tickets) && data.tickets.length > 0) {
+          setTickets((prev) => {
+            const existingIds = new Set(prev.map((t) => t.id));
+            const newTickets = (data.tickets as Ticket[]).filter((t) => !existingIds.has(t.id));
+            if (newTickets.length > 0) {
+              newTickets.forEach((t) => {
+                if (
+                  t.sinistroZonal ||
+                  t.outageCause === 'CORTE_ELECTRICO_MASIVO' ||
+                  t.telemetriaZabbix?.probableCausa === 'CORTE_ELECTRICO_MASIVO' ||
+                  t.priority === 'urgent'
+                ) {
+                  setCriticalBlackoutAlert({
+                    ticket: t,
+                    schoolName: t.schoolName,
+                    ugel: t.ugel,
+                    probableCausa: t.telemetriaZabbix?.probableCausa || 'CORTE_ELECTRICO_MASIVO',
+                  });
+                  setPhoneTargetSchool(t.schoolName);
+                }
+              });
+              return [...newTickets, ...prev];
+            }
+            return prev;
+          });
+        }
+      } catch {
+        // Fallback silencioso
+      }
+    };
+
+    fetchRecentWebhookTickets();
+    const interval = setInterval(fetchRecentWebhookTickets, 2500);
+    return () => clearInterval(interval);
+  }, []);
+
   // Priority sandbox tester in Priorities tab
   const [sandboxPriority, setSandboxPriority] = useState<Priority>('high');
 
