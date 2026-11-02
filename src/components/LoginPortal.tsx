@@ -61,14 +61,14 @@ export const LoginPortal: React.FC = () => {
               Mesa de Ayuda TI & Monitoreo Proactivo
             </span>
             <span className="hidden sm:inline text-xs text-slate-500 ml-2">
-              · UGEL 01 al 07 (Lima Metropolitana)
+              · Jurisdicción UGEL 07 (Lima Sur)
             </span>
           </div>
         </div>
 
-        <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-800/60 px-2.5 py-1 rounded-full text-[11px] text-emerald-400 font-mono">
+        <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-800/60 px-3 py-1 rounded-full text-[11px] text-emerald-400 font-mono">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span>ZABBIX 192.168.40.10:10051 ONLINE</span>
+          <span>PORTAL EN LÍNEA · UGEL 07</span>
         </div>
       </header>
 
@@ -76,7 +76,7 @@ export const LoginPortal: React.FC = () => {
       <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto p-6 md:p-10 flex flex-col justify-center">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
           
-          {/* Left Column: Thesis Context & Architectural Telemetry */}
+          {/* Left Column: Thesis Context & Scope */}
           <div className="lg:col-span-7 space-y-6">
             <div className="space-y-3">
               <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/10 border border-indigo-500/30 text-indigo-300 text-xs font-medium">
@@ -89,10 +89,8 @@ export const LoginPortal: React.FC = () => {
               </h1>
               
               <p className="text-sm md:text-base text-slate-400 leading-relaxed">
-                Sistema institucional para Instituciones Educativas de Lima Metropolitana.
-                Integra topología multi-VLAN en <strong>Cisco Packet Tracer (TOPOLOGIA.pkt)</strong>,
-                telemetría SNMPv3 con <strong>Zabbix Server 7.0</strong> en Ubuntu 22.04 LTS,
-                banco de pruebas en <strong>VMware vSphere</strong> y API backend en Spring Boot con base de datos MySQL.
+                Sistema institucional para las Instituciones Educativas de la <strong>UGEL 07</strong> (San Borja, Miraflores, Santiago de Surco, Barranco, Chorrillos, Surquillo y San Luis).
+                Optimiza la supervisión continua de la conectividad en Aulas de Innovación Pedagógica (AIP), la atención oportuna de incidencias técnicas y el cumplimiento riguroso de tiempos de respuesta según criticidad.
               </p>
             </div>
 

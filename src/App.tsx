@@ -1,8 +1,7 @@
 import React, { useState } from 'react';
-import { Ticket, Priority, TicketStatus, UGELCode } from './types/helpdesk';
+import { Ticket, Priority, TicketStatus } from './types/helpdesk';
 import { INITIAL_TICKETS, PRIORITY_CONFIGS } from './data/mockData';
 import { PrioritySelector } from './components/PrioritySelector';
-import { VMwareTester } from './components/VMwareTester';
 import { TicketSubmissionModal } from './components/TicketSubmissionModal';
 import { TicketDetailModal } from './components/TicketDetailModal';
 import { ThesisValidationPanel } from './components/ThesisValidationPanel';
@@ -41,6 +40,9 @@ import {
   ZapOff,
   Volume2,
   Network,
+  X,
+  Bell,
+  Menu,
 } from 'lucide-react';
 import { EmergencyPhoneModal } from './components/EmergencyPhoneModal';
 import { LoginPortal } from './components/LoginPortal';
@@ -49,14 +51,55 @@ import { PacketTracerTopology } from './components/PacketTracerTopology';
 export default function App() {
   const { currentUser, logout, hasRole } = useAuth();
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const isGeneralUser = currentUser?.rol === 'DOCENTE' || currentUser?.rol === 'ALUMNO';
   const isTechnician = currentUser?.rol === 'TECNICO';
   const isAdmin = currentUser?.rol === 'ADMIN';
 
   const [activeSection, setActiveSection] = useState<
-    'tickets' | 'packet-tracer' | 'vmware' | 'siniestros' | 'priorities' | 'thesis' | 'architecture'
+    'tickets' | 'packet-tracer' | 'siniestros' | 'priorities' | 'thesis' | 'architecture'
   >('tickets');
-  const [tickets, setTickets] = useState<Ticket[]>(INITIAL_TICKETS);
+
+  // Audio chime for real-time alert reception
+  const playAlertChime = () => {
+    try {
+      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(880, ctx.currentTime);
+      osc.frequency.setValueAtTime(1174.66, ctx.currentTime + 0.12);
+      gain.gain.setValueAtTime(0.3, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      osc.start(ctx.currentTime);
+      osc.stop(ctx.currentTime + 0.4);
+    } catch {}
+  };
+
+  const [latestZabbixAlert, setLatestZabbixAlert] = useState<Ticket | null>(null);
+  const [zabbixWebhookEventCount, setZabbixWebhookEventCount] = useState<number>(0);
+
+  const [tickets, setTickets] = useState<Ticket[]>(() => {
+    try {
+      const saved = localStorage.getItem('edudesk_tickets_cache');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return INITIAL_TICKETS;
+  });
+
+  React.useEffect(() => {
+    try {
+      localStorage.setItem('edudesk_tickets_cache', JSON.stringify(tickets));
+    } catch {}
+  }, [tickets]);
+
   const [isNewTicketModalOpen, setIsNewTicketModalOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
@@ -64,14 +107,13 @@ export default function App() {
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | TicketStatus>('all');
-  const [ugelFilter, setUgelFilter] = useState<'all' | UGELCode>('all');
   const [origenFilter, setOrigenFilter] = useState<'all' | 'AUTOMATICO' | 'MANUAL'>('all');
   const [onlyMyTickets, setOnlyMyTickets] = useState<boolean>(isGeneralUser);
 
   // When switching role, align default view and filtering
   React.useEffect(() => {
     setOnlyMyTickets(isGeneralUser);
-    if (isGeneralUser && (activeSection === 'vmware' || activeSection === 'thesis')) {
+    if (isGeneralUser && activeSection === 'thesis') {
       setActiveSection('tickets');
     }
   }, [currentUser?.rol]);
@@ -84,10 +126,17 @@ export default function App() {
         if (!res.ok) return;
         const data = await res.json();
         if (data.success && Array.isArray(data.tickets) && data.tickets.length > 0) {
+          setZabbixWebhookEventCount(data.count || data.tickets.length);
           setTickets((prev) => {
             const existingIds = new Set(prev.map((t) => t.id));
             const newTickets = (data.tickets as Ticket[]).filter((t) => !existingIds.has(t.id));
             if (newTickets.length > 0) {
+              setLatestZabbixAlert(newTickets[0]);
+              playAlertChime();
+              setOrigenFilter('all');
+              setPriorityFilter('all');
+              setStatusFilter('all');
+
               newTickets.forEach((t) => {
                 if (
                   t.sinistroZonal ||
@@ -191,8 +240,8 @@ export default function App() {
     setSelectedTicket(updated);
   };
 
-  // Automated trigger from Zabbix SNMP webhook (Pág. 32-34 del informe)
-  const triggerSimulatedZabbixAlert = () => {
+  // Automated trigger from network telemetry simulation
+  const triggerSimulatedNetworkAlert = () => {
     const now = new Date();
     const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
       now.getDate()
@@ -201,23 +250,23 @@ export default function App() {
     ).padStart(2, '0')}`;
 
     const newAutoTicket: Ticket = {
-      id: `t-zabbix-${Date.now()}`,
+      id: `t-auto-${Date.now()}`,
       code: `TK-${now.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      title: 'Alerta Zabbix SNMP: Puerto Gi0/12 Switch Cisco Catalyst DOWN (VLAN 30)',
-      titulo: 'Alerta Zabbix SNMP: Puerto Gi0/12 Switch Cisco Catalyst DOWN (VLAN 30)',
-      description: 'El servidor Zabbix recibió trampa SNMP ifOperStatus = DOWN en la interfaz de red del Laboratorio 2. Se interrumpieron 24 PCs clientes virtuales.',
-      descripcion: 'El servidor Zabbix recibió trampa SNMP ifOperStatus = DOWN en la interfaz de red del Laboratorio 2.',
+      title: 'Alerta de Red: Puerto Gi0/12 Switch Troncal DOWN (VLAN 30)',
+      titulo: 'Alerta de Red: Puerto Gi0/12 Switch Troncal DOWN (VLAN 30)',
+      description: 'El sistema de supervisión de red detectó estado DOWN en la interfaz de red del Laboratorio AIP 2. Se interrumpieron 24 PCs clientes del aula.',
+      descripcion: 'El sistema de supervisión de red detectó estado DOWN en la interfaz de red del Laboratorio AIP 2.',
       origen: 'AUTOMATICO',
       priority: 'high',
       status: 'open',
       category: 'networking_connectivity',
-      ugel: 'UGEL 03',
-      sede: 'Sede San Isidro - Switch Core',
-      schoolName: 'I.E. Gran Unidad Escolar Alfonso Ugarte (San Isidro)',
+      ugel: 'UGEL 07',
+      sede: 'Sede Miraflores - Switch de Distribución',
+      schoolName: 'I.E. Juana Alarco de Dammert (Miraflores)',
       reporterUserId: 'usr-4',
-      reporterName: 'Sensor Zabbix SNMPv3 (VLAN 30)',
+      reporterName: 'Sensor de Red Automatizado (VLAN 30)',
       reporterRole: 'Monitoreo Proactivo de Red',
-      reporterEmail: 'zabbix-webhook@cibertec.edu.pe',
+      reporterEmail: 'telemetria@ugel07.gob.pe',
       classroomLab: 'Laboratorio AIP 2 (Pabellón B)',
       createdAt: formattedDate,
       slaTargetHours: 8,
@@ -225,9 +274,9 @@ export default function App() {
       comments: [
         {
           id: `c-${Date.now()}`,
-          author: 'Zabbix Webhook API',
+          author: 'Sistema de Telemetría de Red',
           role: 'Integración Automatizada',
-          text: 'Trigger de red detectado automáticamente. Incidencia generada de forma predictiva según arquitectura Pág. 31 del proyecto CIBERTEC.',
+          text: 'Falla de red detectada automáticamente. Incidencia generada de forma predictiva según arquitectura de red.',
           timestamp: formattedDate,
         },
       ],
@@ -237,7 +286,10 @@ export default function App() {
   };
 
   const filteredTickets = tickets.filter((t) => {
-    if (onlyMyTickets && currentUser) {
+    // Focus strictly on UGEL 07 as requested
+    if (t.ugel !== 'UGEL 07') return false;
+
+    if (onlyMyTickets && currentUser && t.origen === 'MANUAL') {
       const isMine =
         t.reporterUserId === currentUser.id ||
         t.reporterEmail.toLowerCase() === currentUser.email.toLowerCase();
@@ -246,7 +298,6 @@ export default function App() {
     if (origenFilter !== 'all' && t.origen !== origenFilter) return false;
     if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
     if (statusFilter !== 'all' && t.status !== statusFilter) return false;
-    if (ugelFilter !== 'all' && t.ugel !== ugelFilter) return false;
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const match =
@@ -285,8 +336,8 @@ export default function App() {
       case 'vmware_testing':
         return (
           <span className="text-xs font-medium text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded flex items-center gap-1">
-            <Server className="w-3 h-3" />
-            <span>En Test VMware</span>
+            <Wrench className="w-3 h-3" />
+            <span>En Diagnóstico</span>
           </span>
         );
       case 'in_progress':
@@ -317,755 +368,865 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col font-sans">
-      {/* Top Bar Contract: 3 zones separated by gap-8 */}
-      <header className="flex items-center justify-between gap-8 px-6 py-4 bg-white border-b border-slate-200 sticky top-0 z-30">
-        {/* Zone 1: Single text element wordmark */}
-        <div className="flex items-center gap-2 whitespace-nowrap shrink-0">
-          <Server className="w-5 h-5 text-indigo-600" />
-          <span className="text-base font-bold tracking-tight text-slate-900">
-            HelpDesk CIBERTEC · Monitoreo & VMware
-          </span>
-        </div>
-
-        {/* Zone 2: Concise single-line navigation links based on user role */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+    <div className="min-h-screen bg-[#f8fafc] text-slate-900 flex flex-col md:flex-row font-sans">
+      {/* Mobile Header Bar */}
+      <div className="md:hidden flex items-center justify-between px-4 py-3 bg-white border-b border-slate-200 sticky top-0 z-40 shadow-xs">
+        <div className="flex items-center gap-2.5">
           <button
-            onClick={() => setActiveSection('tickets')}
-            className={`whitespace-nowrap shrink-0 transition-colors cursor-pointer pb-0.5 ${
-              activeSection === 'tickets'
-                ? 'text-indigo-600 font-semibold border-b-2 border-indigo-600'
-                : 'hover:text-slate-900'
-            }`}
+            onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+            className="p-2 rounded-lg text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
+            aria-label="Abrir menú"
           >
-            Incidentes & Tickets
+            {isMobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
           </button>
-
-          <button
-            onClick={() => setActiveSection('packet-tracer')}
-            className={`whitespace-nowrap shrink-0 transition-colors cursor-pointer pb-0.5 flex items-center gap-1.5 ${
-              activeSection === 'packet-tracer'
-                ? 'text-indigo-600 font-semibold border-b-2 border-indigo-600'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            <Network className="w-3.5 h-3.5 text-indigo-500" />
-            <span>Topología Packet Tracer</span>
-          </button>
-
-          {!isGeneralUser && (
-            <button
-              onClick={() => setActiveSection('vmware')}
-              className={`whitespace-nowrap shrink-0 transition-colors cursor-pointer pb-0.5 ${
-                activeSection === 'vmware'
-                  ? 'text-indigo-600 font-semibold border-b-2 border-indigo-600'
-                  : 'hover:text-slate-900'
-              }`}
-            >
-              Banco de Pruebas VMware
-            </button>
-          )}
-
-          <button
-            onClick={() => setActiveSection('siniestros')}
-            className={`whitespace-nowrap shrink-0 transition-colors cursor-pointer pb-0.5 flex items-center gap-1.5 ${
-              activeSection === 'siniestros'
-                ? 'text-red-600 font-semibold border-b-2 border-red-600'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            <Radio className="w-3.5 h-3.5 text-red-500 animate-pulse" />
-            <span>Siniestros & Apagones Zabbix</span>
-          </button>
-
-          <button
-            onClick={() => setActiveSection('priorities')}
-            className={`whitespace-nowrap shrink-0 transition-colors cursor-pointer pb-0.5 ${
-              activeSection === 'priorities'
-                ? 'text-indigo-600 font-semibold border-b-2 border-indigo-600'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            {isGeneralUser ? 'Guía de Prioridades SLA' : 'Selector & Matriz Prioridades'}
-          </button>
-
-          {!isGeneralUser && (
-            <button
-              onClick={() => setActiveSection('thesis')}
-              className={`whitespace-nowrap shrink-0 transition-colors cursor-pointer pb-0.5 ${
-                activeSection === 'thesis'
-                  ? 'text-indigo-600 font-semibold border-b-2 border-indigo-600'
-                  : 'hover:text-slate-900'
-              }`}
-            >
-              Métricas de Titulación
-            </button>
-          )}
-
-          <button
-            onClick={() => setActiveSection('architecture')}
-            className={`whitespace-nowrap shrink-0 transition-colors cursor-pointer pb-0.5 ${
-              activeSection === 'architecture'
-                ? 'text-indigo-600 font-semibold border-b-2 border-indigo-600'
-                : 'hover:text-slate-900'
-            }`}
-          >
-            {isGeneralUser ? 'Memoria del Proyecto' : 'MySQL & VMware Real'}
-          </button>
-        </nav>
-
-        {/* Zone 3: Member Profile & Primary Action */}
-        <div className="flex items-center gap-3 shrink-0">
-          {/* Share Modal Opener */}
-          <button
-            onClick={() => setIsShareModalOpen(true)}
-            title="Enlaces de acceso para el equipo"
-            className="inline-flex items-center gap-1 px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50/70 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors cursor-pointer"
-          >
-            <Share2 className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Equipo</span>
-          </button>
-
-          {/* Authenticated Member Profile Display */}
-          <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-slate-200 bg-slate-50">
-            <div
-              className={`w-2.5 h-2.5 rounded-full shrink-0 ${
-                currentUser?.rol === 'ADMIN' ? 'bg-rose-500' : 'bg-emerald-500'
-              }`}
-            />
-            <div className="text-left">
-              <p className="text-xs font-bold text-slate-800 leading-tight">
-                {currentUser?.nombre}
-              </p>
-              <div className="flex items-center gap-1.5 mt-0.5">
-                <span
-                  className={`text-[9px] font-bold px-1.5 py-0.2 rounded uppercase ${
-                    currentUser?.rol === 'ADMIN'
-                      ? 'bg-rose-100 text-rose-700'
-                      : 'bg-emerald-100 text-emerald-700'
-                  }`}
-                >
-                  {currentUser?.rol === 'ADMIN' ? 'Admin NOC' : 'Técnico TI'}
-                </span>
-                <span className="text-[10px] text-slate-400 font-mono">
-                  {currentUser?.username}
-                </span>
-              </div>
+          <div className="flex items-center gap-2">
+            <div className="w-8 h-8 rounded-lg bg-indigo-600 text-white flex items-center justify-center font-bold text-sm shadow-xs">
+              ED
+            </div>
+            <div>
+              <span className="font-bold text-slate-900 text-sm block leading-none">EduDesk TI</span>
+              <span className="text-[10px] text-slate-500 font-medium">UGEL 07 · Mesa de Ayuda</span>
             </div>
           </div>
+        </div>
+        <button
+          onClick={() => setIsNewTicketModalOpen(true)}
+          className="p-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition-colors shadow-xs cursor-pointer"
+          title="Nuevo Ticket"
+        >
+          <Plus className="w-4 h-4" />
+        </button>
+      </div>
 
-          {/* Logout Button: Returns to Login Portal */}
-          <button
-            onClick={() => logout()}
-            title="Cerrar sesión y volver a la pantalla de acceso"
-            className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-rose-200 hover:border-rose-300 bg-rose-50/70 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors cursor-pointer shadow-xs"
-          >
-            <LogOut className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Cerrar Sesión</span>
-          </button>
+      {/* Mobile Backdrop Overlay */}
+      {isMobileMenuOpen && (
+        <div
+          onClick={() => setIsMobileMenuOpen(false)}
+          className="md:hidden fixed inset-0 z-40 bg-slate-900/40 backdrop-blur-xs"
+        />
+      )}
 
+      {/* Left Sidebar */}
+      <aside
+        className={`fixed inset-y-0 left-0 z-50 w-64 lg:w-72 bg-white border-r border-slate-200 flex flex-col justify-between transition-transform duration-200 ease-in-out md:static md:translate-x-0 md:h-screen md:sticky md:top-0 shrink-0 ${
+          isMobileMenuOpen ? 'translate-x-0 shadow-2xl' : '-translate-x-full md:shadow-none'
+        }`}
+      >
+        {/* Sidebar Header / Brand */}
+        <div className="p-5 border-b border-slate-200">
+          <div className="flex items-center justify-between mb-3.5">
+            <div className="flex items-center gap-2.5">
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-700 to-indigo-500 text-white flex items-center justify-center shadow-sm shadow-indigo-200 font-bold text-sm tracking-tight">
+                ED
+              </div>
+              <div>
+                <h1 className="text-base font-bold text-slate-900 tracking-tight leading-tight">
+                  EduDesk TI
+                </h1>
+                <p className="text-[11px] font-semibold text-indigo-600 leading-tight">
+                  Mesa de Ayuda · UGEL 07
+                </p>
+              </div>
+            </div>
+            {/* Close button on mobile */}
+            <button
+              onClick={() => setIsMobileMenuOpen(false)}
+              className="md:hidden p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 cursor-pointer"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+
+          {/* Telemetry Status badge */}
+          <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200/80 text-[11px] text-emerald-700">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span className="font-medium">Telemetría de Red</span>
+            </div>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-mono">
+              En Línea
+            </span>
+          </div>
+
+          {/* Primary Action Button */}
           <button
-            onClick={() => setIsNewTicketModalOpen(true)}
-            className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold text-white bg-slate-900 rounded-lg hover:bg-slate-800 transition-colors whitespace-nowrap shrink-0 cursor-pointer shadow-sm"
+            onClick={() => {
+              setIsNewTicketModalOpen(true);
+              setIsMobileMenuOpen(false);
+            }}
+            className="w-full mt-3.5 inline-flex items-center justify-center gap-2 px-3.5 py-2.5 text-xs font-bold text-white bg-slate-900 hover:bg-slate-800 rounded-xl transition-colors shadow-xs cursor-pointer"
           >
-            <Plus className="w-3.5 h-3.5" />
+            <Plus className="w-4 h-4" />
             <span>{isGeneralUser ? 'Reportar Incidencia' : 'Nuevo Ticket'}</span>
           </button>
         </div>
-      </header>
+
+        {/* Navigation items */}
+        <nav className="flex-1 p-3 space-y-1 overflow-y-auto text-xs font-semibold">
+          <button
+            onClick={() => {
+              setActiveSection('tickets');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+              activeSection === 'tickets'
+                ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Layers className="w-4 h-4 text-indigo-500" />
+              <span>Incidentes & Tickets</span>
+            </div>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              activeSection === 'tickets' ? 'bg-indigo-200 text-indigo-900' : 'bg-slate-100 text-slate-600'
+            }`}>
+              {filteredTickets.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveSection('packet-tracer');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+              activeSection === 'packet-tracer'
+                ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Network className="w-4 h-4 text-indigo-500" />
+            <span>Topología Packet Tracer</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveSection('siniestros');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+              activeSection === 'siniestros'
+                ? 'bg-red-50 text-red-700 font-bold border border-red-200/70'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <Radio className="w-4 h-4 text-red-500 animate-pulse" />
+              <span>Monitoreo & Siniestros</span>
+            </div>
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveSection('priorities');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+              activeSection === 'priorities'
+                ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Sliders className="w-4 h-4 text-indigo-500" />
+            <span>{isGeneralUser ? 'Guía de Prioridades SLA' : 'Matriz de Prioridades SLA'}</span>
+          </button>
+
+          {!isGeneralUser && (
+            <button
+              onClick={() => {
+                setActiveSection('thesis');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+                activeSection === 'thesis'
+                  ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <CheckCircle2 className="w-4 h-4 text-indigo-500" />
+              <span>Métricas de Titulación</span>
+            </button>
+          )}
+
+          <button
+            onClick={() => {
+              setActiveSection('architecture');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+              activeSection === 'architecture'
+                ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <Server className="w-4 h-4 text-indigo-500" />
+            <span>{isGeneralUser ? 'Memoria del Proyecto' : 'Arquitectura del Sistema'}</span>
+          </button>
+        </nav>
+
+        {/* User Footer Profile & Actions */}
+        <div className="p-3 border-t border-slate-200 space-y-2.5 bg-slate-50/70">
+          <div className="p-2.5 rounded-xl bg-white border border-slate-200 flex items-center gap-2.5">
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center font-bold text-xs text-white shrink-0 ${
+              currentUser?.rol === 'ADMIN' ? 'bg-rose-600' : 'bg-emerald-600'
+            }`}>
+              {currentUser?.nombre?.charAt(0) || 'U'}
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-bold text-slate-800 truncate leading-tight">
+                {currentUser?.nombre}
+              </p>
+              <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
+                {currentUser?.rol === 'ADMIN' ? 'Admin NOC' : 'Técnico TI'} · UGEL 07
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={() => setIsShareModalOpen(true)}
+              className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <Share2 className="w-3.5 h-3.5" />
+              <span>Equipo</span>
+            </button>
+
+            <button
+              onClick={() => logout()}
+              className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors cursor-pointer"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span>Salir</span>
+            </button>
+          </div>
+        </div>
+      </aside>
 
       {/* Main Content Area */}
-      <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-        {/* Emergency Alert for Network Administrator and Operations Staff */}
-        {criticalBlackoutAlert && (
-          <div className="p-5 rounded-2xl bg-gradient-to-r from-red-950 via-slate-900 to-red-950 text-white border-2 border-red-500 shadow-2xl relative overflow-hidden">
-            <div className="absolute right-0 top-0 w-80 h-80 bg-red-600/20 rounded-full blur-3xl pointer-events-none" />
-            <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
-              <div className="flex items-start gap-3.5">
-                <div className="w-12 h-12 rounded-2xl bg-red-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-red-600/50">
-                  <ZapOff className="w-6 h-6 animate-pulse" />
+      <div className="flex-1 flex flex-col min-w-0 min-h-screen">
+        <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
+          {/* Real-time Incident Alert Banner */}
+          {latestZabbixAlert && (
+            <div className="p-4 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-indigo-900 text-white shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-red-400">
+              <div className="flex items-center gap-3.5">
+                <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
+                  <Bell className="w-6 h-6 text-white animate-pulse" />
                 </div>
-                <div className="space-y-1">
+                <div className="space-y-0.5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[11px] font-bold tracking-wide animate-pulse flex items-center gap-1">
-                      <Radio className="w-3 h-3" />
-                      <span>ALERTA CRÍTICA ZABBIX NOC · APAGÓN GENERAL</span>
+                    <span className="px-2 py-0.5 rounded-full bg-white/25 text-white text-[10px] font-bold tracking-wider uppercase">
+                      🟢 Incidencia Detectada en Tiempo Real
                     </span>
-                    <span className="font-mono text-xs text-red-300 font-bold">
-                      {criticalBlackoutAlert.ticket.code}
+                    <span className="font-mono text-xs font-bold text-amber-300">
+                      {latestZabbixAlert.code}
                     </span>
-                    <span className="text-xs text-slate-400">·</span>
-                    <span className="text-xs font-semibold text-amber-300">
-                      SLA: &lt; 2 Horas (Prioridad Urgente)
+                    <span className="text-xs text-white/80">·</span>
+                    <span className="text-xs text-white/90">
+                      Sede: <strong>{latestZabbixAlert.schoolName}</strong>
                     </span>
                   </div>
-                  <h2 className="text-base font-bold text-white">
-                    {criticalBlackoutAlert.ticket.title}
-                  </h2>
-                  <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">
-                    Se confirmó la desconexión total de 220V (0 VAC / Trampa Last Gasp) y pérdida de telemetría en <strong>{criticalBlackoutAlert.schoolName}</strong> ({criticalBlackoutAlert.ugel}). La sede se encuentra incomunicada por red de datos.
+                  <h4 className="text-sm font-bold text-white">
+                    {latestZabbixAlert.title}
+                  </h4>
+                  <p className="text-xs text-white/80 line-clamp-1">
+                    {latestZabbixAlert.description}
                   </p>
                 </div>
               </div>
 
-              <div className="flex flex-wrap lg:flex-col gap-2 shrink-0">
+              <div className="flex items-center gap-2 shrink-0">
                 <button
-                  type="button"
                   onClick={() => {
-                    setPhoneTargetSchool(criticalBlackoutAlert.schoolName);
-                    setIsPhoneModalOpen(true);
+                    setSelectedTicket(latestZabbixAlert);
+                    setActiveSection('tickets');
                   }}
-                  className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-900/50 flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                  className="px-3.5 py-2 rounded-xl bg-white text-indigo-900 hover:bg-slate-100 text-xs font-bold transition-all shadow-md cursor-pointer"
                 >
-                  <PhoneCall className="w-4 h-4 animate-bounce" />
-                  <span>Llamada Telefónica al Colegio</span>
+                  Ver Incidencia
                 </button>
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => setSelectedTicket(criticalBlackoutAlert.ticket)}
-                    className="flex-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                  >
-                    <span>Ver Ficha Ticket</span>
-                    <ChevronRight className="w-3.5 h-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCriticalBlackoutAlert(null)}
-                    className="px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white text-xs font-medium border border-slate-800 cursor-pointer transition-colors"
-                  >
-                    Reconocer
-                  </button>
-                </div>
+                <button
+                  onClick={() => setLatestZabbixAlert(null)}
+                  title="Descartar aviso"
+                  className="p-2 rounded-xl hover:bg-white/20 text-white transition-colors cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Section 1: Tickets & Incidents Management */}
-        {activeSection === 'tickets' && (
-          <div className="space-y-6">
-            {/* Active User Role Banner (Docente / Alumno vs Técnico vs Admin) */}
-            <div className={`p-4 rounded-2xl border transition-all ${
-              isGeneralUser
-                ? 'border-indigo-200 bg-gradient-to-r from-indigo-50/70 to-white'
-                : isAdmin
-                ? 'border-rose-200 bg-gradient-to-r from-rose-50/60 to-white'
-                : 'border-emerald-200 bg-gradient-to-r from-emerald-50/60 to-white'
-            }`}>
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
-                <div className="flex items-center gap-3">
-                  <div className={`p-2.5 rounded-xl text-white shadow-xs ${
-                    isGeneralUser
-                      ? 'bg-indigo-600'
-                      : isAdmin
-                      ? 'bg-rose-600'
-                      : 'bg-emerald-600'
-                  }`}>
-                    {isGeneralUser ? (
-                      <GraduationCap className="w-5 h-5" />
-                    ) : isAdmin ? (
-                      <ShieldCheck className="w-5 h-5" />
-                    ) : (
-                      <Wrench className="w-5 h-5" />
-                    )}
+          {/* Emergency Alert for Network Administrator and Operations Staff */}
+          {criticalBlackoutAlert && (
+            <div className="p-5 rounded-2xl bg-gradient-to-r from-red-950 via-slate-900 to-red-950 text-white border-2 border-red-500 shadow-2xl relative overflow-hidden">
+              <div className="absolute right-0 top-0 w-80 h-80 bg-red-600/20 rounded-full blur-3xl pointer-events-none" />
+              <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-5">
+                <div className="flex items-start gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-red-600 text-white flex items-center justify-center shrink-0 shadow-lg shadow-red-600/50">
+                    <ZapOff className="w-6 h-6 animate-pulse" />
                   </div>
-
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="font-bold text-slate-900 text-sm">
-                        {currentUser?.nombre}
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[11px] font-bold tracking-wide animate-pulse flex items-center gap-1">
+                        <Radio className="w-3 h-3" />
+                        <span>ALERTA CRÍTICA · INTERRUPCIÓN GENERAL DE RED (UGEL 07)</span>
                       </span>
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                        isGeneralUser
-                          ? 'bg-indigo-100 text-indigo-800'
-                          : isAdmin
-                          ? 'bg-rose-100 text-rose-800'
-                          : 'bg-emerald-100 text-emerald-800'
-                      }`}>
-                        {currentUser?.rolLabel}
+                      <span className="font-mono text-xs text-red-300 font-bold">
+                        {criticalBlackoutAlert.ticket.code}
+                      </span>
+                      <span className="text-xs text-slate-400">·</span>
+                      <span className="text-xs font-semibold text-amber-300">
+                        SLA: &lt; 2 Horas (Prioridad Urgente)
                       </span>
                     </div>
-                    <p className="text-slate-500 mt-0.5">
-                      {isGeneralUser
-                        ? `${currentUser?.institucionSede} · Vista de usuario para registrar y seguir el estado de fallas en su aula.`
-                        : isAdmin
-                        ? `${currentUser?.institucionSede} · Acceso total a topología de red, reglas SNMP y métricas de titulación.`
-                        : `${currentUser?.institucionSede} · Permisos activos para diagnosticar, resolver y testear en VMware.`}
+                    <h2 className="text-base font-bold text-white">
+                      {criticalBlackoutAlert.ticket.title}
+                    </h2>
+                    <p className="text-xs text-slate-300 leading-relaxed max-w-3xl">
+                      Se confirmó la desconexión total y pérdida de telemetría en <strong>{criticalBlackoutAlert.schoolName}</strong> ({criticalBlackoutAlert.ugel}). La sede se encuentra incomunicada por red de datos.
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  {isGeneralUser ? (
+                <div className="flex flex-wrap lg:flex-col gap-2 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setPhoneTargetSchool(criticalBlackoutAlert.schoolName);
+                      setIsPhoneModalOpen(true);
+                    }}
+                    className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow-lg shadow-emerald-900/50 flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <PhoneCall className="w-4 h-4 animate-bounce" />
+                    <span>Llamada Telefónica al Colegio</span>
+                  </button>
+                  <div className="flex items-center gap-2">
                     <button
-                      onClick={() => setOnlyMyTickets(!onlyMyTickets)}
-                      className={`px-3 py-1.5 rounded-lg font-semibold cursor-pointer transition-colors ${
-                        onlyMyTickets
-                          ? 'bg-indigo-600 text-white shadow-xs'
-                          : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
-                      }`}
+                      type="button"
+                      onClick={() => setSelectedTicket(criticalBlackoutAlert.ticket)}
+                      className="flex-1 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold border border-slate-700 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                     >
-                      {onlyMyTickets ? '✓ Viendo sólo mis reportes' : 'Ver solo mis reportes'}
+                      <span>Ver Ficha Ticket</span>
+                      <ChevronRight className="w-3.5 h-3.5" />
                     </button>
-                  ) : (
-                    <div className="flex items-center gap-2">
-                      <button
-                        onClick={() => setActiveSection('siniestros')}
-                        title="Monitoreo de Siniestros Zonales, Apagones Masivos y Caídas de Fibra Óptica (Zabbix NOC)"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold bg-red-600 hover:bg-red-700 text-white cursor-pointer shadow-xs transition-colors"
-                      >
-                        <Radio className="w-3.5 h-3.5 animate-pulse" />
-                        <span>🚨 Siniestros & Apagones NOC</span>
-                      </button>
+                    <button
+                      type="button"
+                      onClick={() => setCriticalBlackoutAlert(null)}
+                      className="px-3 py-1.5 rounded-xl bg-slate-900/80 hover:bg-slate-800 text-slate-400 hover:text-white text-xs font-medium border border-slate-800 cursor-pointer transition-colors"
+                    >
+                      Reconocer
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
-                      <button
-                        onClick={triggerSimulatedZabbixAlert}
-                        title="Simula la recepción de una trampa SNMP desde el switch de laboratorios hacia la API REST del Help Desk (Pág. 32-34 del informe CIBERTEC)"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold bg-amber-500 hover:bg-amber-600 text-white cursor-pointer shadow-xs transition-colors"
-                      >
-                        <Zap className="w-3.5 h-3.5 fill-current" />
-                        <span>⚡ Simular Alerta SNMP</span>
-                      </button>
+          {/* Section 1: Tickets & Incidents Management */}
+          {activeSection === 'tickets' && (
+            <div className="space-y-6">
+              {/* Active User Role Banner */}
+              <div className={`p-4 rounded-2xl border transition-all ${
+                isGeneralUser
+                  ? 'border-indigo-200 bg-gradient-to-r from-indigo-50/70 to-white'
+                  : isAdmin
+                  ? 'border-rose-200 bg-gradient-to-r from-rose-50/60 to-white'
+                  : 'border-emerald-200 bg-gradient-to-r from-emerald-50/60 to-white'
+              }`}>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2.5 rounded-xl text-white shadow-xs ${
+                      isGeneralUser
+                        ? 'bg-indigo-600'
+                        : isAdmin
+                        ? 'bg-rose-600'
+                        : 'bg-emerald-600'
+                    }`}>
+                      {isGeneralUser ? (
+                        <GraduationCap className="w-5 h-5" />
+                      ) : isAdmin ? (
+                        <ShieldCheck className="w-5 h-5" />
+                      ) : (
+                        <Wrench className="w-5 h-5" />
+                      )}
                     </div>
+
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-slate-900 text-sm">
+                          {currentUser?.nombre}
+                        </span>
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                          isGeneralUser
+                            ? 'bg-indigo-100 text-indigo-800'
+                            : isAdmin
+                            ? 'bg-rose-100 text-rose-800'
+                            : 'bg-emerald-100 text-emerald-800'
+                        }`}>
+                          {currentUser?.rolLabel}
+                        </span>
+                      </div>
+                      <p className="text-slate-500 mt-0.5">
+                        {isGeneralUser
+                          ? `${currentUser?.institucionSede} · Vista de usuario para registrar y seguir el estado de incidencias.`
+                          : isAdmin
+                          ? `${currentUser?.institucionSede} · Monitoreo centralizado de sedes y topología de red.`
+                          : `${currentUser?.institucionSede} · Permisos de atención técnica y diagnóstico de incidentes.`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 shrink-0">
+                    {isGeneralUser ? (
+                      <button
+                        onClick={() => setOnlyMyTickets(!onlyMyTickets)}
+                        className={`px-3 py-1.5 rounded-lg font-semibold cursor-pointer transition-colors ${
+                          onlyMyTickets
+                            ? 'bg-indigo-600 text-white shadow-xs'
+                            : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        {onlyMyTickets ? '✓ Viendo sólo mis reportes' : 'Ver solo mis reportes'}
+                      </button>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setActiveSection('siniestros')}
+                          title="Monitoreo de Siniestros Zonales e Interrupciones de Conectividad"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold bg-red-600 hover:bg-red-700 text-white cursor-pointer shadow-xs transition-colors"
+                        >
+                          <Radio className="w-3.5 h-3.5 animate-pulse" />
+                          <span>Monitoreo de Siniestros</span>
+                        </button>
+
+                        <button
+                          onClick={triggerSimulatedNetworkAlert}
+                          title="Simula la recepción de una alerta de red de laboratorio"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold bg-amber-500 hover:bg-amber-600 text-white cursor-pointer shadow-xs transition-colors"
+                        >
+                          <Zap className="w-3.5 h-3.5 fill-current" />
+                          <span>⚡ Simular Falla de Red</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Top Overview Banner */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-white border border-slate-200">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-bold uppercase tracking-wider text-indigo-700">
+                      Mesa de Ayuda · UGEL 07
+                    </span>
+                    <span className="text-xs text-slate-300">·</span>
+                    <span className="text-xs font-medium text-emerald-600">SLA Automatizado Activo</span>
+                  </div>
+                  <h1 className="text-lg font-bold text-slate-900 mt-0.5">
+                    {isGeneralUser ? 'Mis Incidentes y Solicitudes de Soporte' : 'Gestión y Triaje de Incidentes Tecnológicos'}
+                  </h1>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    {isGeneralUser
+                      ? 'Consulte el avance de atención de sus solicitudes con clasificación por criticidad (Baja, Media, Alta, Urgente).'
+                      : 'Categorización por criticidad, recepción de eventos de red y diagnóstico proactivo de infraestructura.'}
+                  </p>
+                </div>
+
+                {/* Priority quick counter tabs */}
+                <div className="flex items-center gap-2">
+                  {(['low', 'medium', 'high', 'urgent'] as Priority[]).map((p) => {
+                    const conf = PRIORITY_CONFIGS[p];
+                    const count = tickets.filter((t) => t.priority === p).length;
+                    const isFiltered = priorityFilter === p;
+                    return (
+                      <button
+                        key={p}
+                        onClick={() => setPriorityFilter(isFiltered ? 'all' : p)}
+                        className={`px-3 py-1.5 rounded-lg border text-left cursor-pointer transition-all ${
+                          isFiltered
+                            ? 'border-slate-900 bg-slate-900 text-white'
+                            : 'border-slate-200 bg-slate-50 hover:bg-white text-slate-700'
+                        }`}
+                      >
+                        <div className="text-[11px] font-semibold">{conf.label}</div>
+                        <div className="text-xs font-bold font-mono tabular-nums">{count}</div>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Filter and Search Bar */}
+              <div className="p-4 rounded-xl bg-white border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                {/* Search */}
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input
+                    type="text"
+                    placeholder="Buscar por código, título, colegio o docente..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
+                  />
+                </div>
+
+                {/* Filter controls */}
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  {/* Origen Filter */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-500 font-medium">Origen:</span>
+                    <select
+                      value={origenFilter}
+                      onChange={(e) => setOrigenFilter(e.target.value as 'all' | 'AUTOMATICO' | 'MANUAL')}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium cursor-pointer"
+                    >
+                      <option value="all">Todos los orígenes</option>
+                      <option value="MANUAL">Manual (Docente / Alumno)</option>
+                      <option value="AUTOMATICO">Automático (Telemetría de Red)</option>
+                    </select>
+                  </div>
+
+                  {/* Priority Filter */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-500 font-medium">Prioridad:</span>
+                    <select
+                      value={priorityFilter}
+                      onChange={(e) => setPriorityFilter(e.target.value as 'all' | Priority)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium cursor-pointer"
+                    >
+                      <option value="all">Todas ({tickets.length})</option>
+                      <option value="low">Baja / Low (&lt; 48h)</option>
+                      <option value="medium">Media / Medium (&lt; 24h)</option>
+                      <option value="high">Alta / High (&lt; 8h)</option>
+                      <option value="urgent">Urgente / Urgent (&lt; 2h)</option>
+                    </select>
+                  </div>
+
+                  {/* Status Filter */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-500 font-medium">Estado:</span>
+                    <select
+                      value={statusFilter}
+                      onChange={(e) => setStatusFilter(e.target.value as 'all' | TicketStatus)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium cursor-pointer"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="open">Abiertos</option>
+                      <option value="vmware_testing">En Diagnóstico</option>
+                      <option value="in_progress">En Progreso</option>
+                      <option value="resolved">Resueltos</option>
+                    </select>
+                  </div>
+
+                  {/* UGEL Fixed Scope Badge (UGEL 07 exclusive) */}
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-semibold">
+                    <Building className="w-3.5 h-3.5 text-indigo-600" />
+                    <span>Jurisdicción: UGEL 07</span>
+                  </div>
+
+                  {(priorityFilter !== 'all' || statusFilter !== 'all' || origenFilter !== 'all' || searchQuery) && (
+                    <button
+                      onClick={() => {
+                        setPriorityFilter('all');
+                        setStatusFilter('all');
+                        setOrigenFilter('all');
+                        setSearchQuery('');
+                      }}
+                      className="px-2.5 py-1.5 text-slate-500 hover:text-slate-900 text-xs font-medium cursor-pointer"
+                    >
+                      Restablecer
+                    </button>
                   )}
                 </div>
               </div>
-            </div>
 
-            {/* Top Overview Banner */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-5 rounded-2xl bg-white border border-slate-200">
-              <div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500">
-                    Mesa de Ayuda UGEL Lima Metropolitana
-                  </span>
-                  <span className="text-xs text-slate-300">·</span>
-                  <span className="text-xs font-medium text-emerald-600">SLA Automatizado Activo</span>
+              {/* Tickets Table / List */}
+              <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
+                <div className="px-6 py-3 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between text-xs font-semibold text-slate-600">
+                  <span>Lista de Solicitudes y Tickets de Soporte ({filteredTickets.length})</span>
+                  <span className="text-slate-400 font-normal">Haga clic en una fila para gestionar el incidente</span>
                 </div>
-                <h1 className="text-lg font-bold text-slate-900 mt-0.5">
-                  {isGeneralUser ? 'Mis Incidentes y Solicitudes de Soporte' : 'Gestión y Triaje de Incidentes Tecnológicos'}
-                </h1>
-                <p className="text-xs text-slate-500 mt-0.5">
-                  {isGeneralUser
-                    ? 'Consulte el avance de atención de sus solicitudes con clasificación por criticidad (Low, Medium, High, Urgent).'
-                    : 'Categorización por criticidad, recepción de alertas Zabbix y verificación de entornos virtuales VMware.'}
-                </p>
-              </div>
 
-              {/* Priority quick counter tabs */}
-              <div className="flex items-center gap-2">
-                {(['low', 'medium', 'high', 'urgent'] as Priority[]).map((p) => {
-                  const conf = PRIORITY_CONFIGS[p];
-                  const count = tickets.filter((t) => t.priority === p).length;
-                  const isFiltered = priorityFilter === p;
-                  return (
+                {filteredTickets.length === 0 ? (
+                  <div className="p-12 text-center space-y-3">
+                    <Info className="w-8 h-8 text-slate-400 mx-auto" />
+                    <h3 className="text-sm font-semibold text-slate-900">
+                      No se encontraron tickets con los filtros seleccionados
+                    </h3>
+                    <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                      Intente cambiar la prioridad seleccionada o registre un nuevo incidente usando el botón superior.
+                    </p>
                     <button
-                      key={p}
-                      onClick={() => setPriorityFilter(isFiltered ? 'all' : p)}
-                      className={`px-3 py-1.5 rounded-lg border text-left cursor-pointer transition-all ${
-                        isFiltered
-                          ? 'border-slate-900 bg-slate-900 text-white'
-                          : 'border-slate-200 bg-slate-50 hover:bg-white text-slate-700'
-                      }`}
+                      onClick={() => {
+                        setPriorityFilter('all');
+                        setStatusFilter('all');
+                        setOrigenFilter('all');
+                        setSearchQuery('');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
                     >
-                      <div className="text-[11px] font-semibold">{conf.label}</div>
-                      <div className="text-xs font-bold font-mono tabular-nums">{count}</div>
+                      Limpiar Filtros
                     </button>
-                  );
-                })}
-              </div>
-            </div>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-slate-100">
+                    {filteredTickets.map((ticket) => (
+                      <div
+                        key={ticket.id}
+                        onClick={() => setSelectedTicket(ticket)}
+                        className="p-4 hover:bg-slate-50/80 transition-colors cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4"
+                      >
+                        {/* Left: Code, School, Title */}
+                        <div className="space-y-1.5 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
+                              {ticket.code}
+                            </span>
+                            {ticket.origen === 'AUTOMATICO' ? (
+                              <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-0.5">
+                                <Zap className="w-2.5 h-2.5 fill-current" />
+                                <span>Telemetría de Red</span>
+                              </span>
+                            ) : (
+                              <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                                Manual
+                              </span>
+                            )}
+                            <span className="text-slate-300">·</span>
+                            <span className="text-xs font-semibold text-indigo-700">
+                              {ticket.ugel}
+                            </span>
+                            <span className="text-slate-300">·</span>
+                            <span className="text-xs text-slate-600">
+                              {ticket.schoolName}
+                            </span>
+                            <span className="text-slate-300">·</span>
+                            <span className="text-xs text-slate-400">
+                              {ticket.classroomLab}
+                            </span>
+                          </div>
 
-            {/* Filter and Search Bar */}
-            <div className="p-4 rounded-xl bg-white border border-slate-200 flex flex-col md:flex-row md:items-center justify-between gap-4">
-              {/* Search */}
-              <div className="relative flex-1">
-                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                <input
-                  type="text"
-                  placeholder="Buscar por código, título, colegio o docente..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-slate-300 text-xs text-slate-900 focus:ring-1 focus:ring-indigo-500 focus:border-indigo-500"
-                />
-              </div>
+                          <h3 className="text-sm font-bold text-slate-900 hover:text-indigo-600 transition-colors">
+                            {ticket.title}
+                          </h3>
 
-              {/* Filter controls */}
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                {/* Origen Filter (CIBERTEC document) */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-500 font-medium">Origen:</span>
-                  <select
-                    value={origenFilter}
-                    onChange={(e) => setOrigenFilter(e.target.value as 'all' | 'AUTOMATICO' | 'MANUAL')}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium"
-                  >
-                    <option value="all">Todos los orígenes</option>
-                    <option value="MANUAL">Manual (Docente / Alumno)</option>
-                    <option value="AUTOMATICO">Automático (Zabbix SNMP)</option>
-                  </select>
-                </div>
+                          <p className="text-xs text-slate-500 line-clamp-1">
+                            {ticket.description}
+                          </p>
 
-                {/* Priority Filter */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-500 font-medium">Prioridad:</span>
-                  <select
-                    value={priorityFilter}
-                    onChange={(e) => setPriorityFilter(e.target.value as 'all' | Priority)}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium"
-                  >
-                    <option value="all">Todas ({tickets.length})</option>
-                    <option value="low">Baja / Low (&lt; 48h)</option>
-                    <option value="medium">Media / Medium (&lt; 24h)</option>
-                    <option value="high">Alta / High (&lt; 8h)</option>
-                    <option value="urgent">Urgente / Urgent (&lt; 2h)</option>
-                  </select>
-                </div>
+                          <div className="flex items-center gap-3 text-[11px] text-slate-400 pt-1">
+                            <span>Reportado por: {ticket.reporterName} ({ticket.reporterRole})</span>
+                            <span>·</span>
+                            <span className="font-mono">{ticket.createdAt}</span>
+                            {ticket.vmwareEnv && (
+                              <>
+                                <span>·</span>
+                                <span className="inline-flex items-center gap-1 text-indigo-600 font-medium">
+                                  <Server className="w-3 h-3" />
+                                  <span>{ticket.vmwareEnv.hypervisor}</span>
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
 
-                {/* Status Filter */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-500 font-medium">Estado:</span>
-                  <select
-                    value={statusFilter}
-                    onChange={(e) => setStatusFilter(e.target.value as 'all' | TicketStatus)}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium"
-                  >
-                    <option value="all">Todos</option>
-                    <option value="open">Abiertos</option>
-                    <option value="vmware_testing">En Test VMware</option>
-                    <option value="in_progress">En Progreso</option>
-                    <option value="resolved">Resueltos</option>
-                  </select>
-                </div>
+                        {/* Right: Priority, Status, Action */}
+                        <div className="flex items-center gap-3 shrink-0 self-end md:self-center">
+                          <div className="flex flex-col items-end gap-1">
+                            {getPriorityBadge(ticket.priority)}
+                            {getStatusBadge(ticket.status)}
+                          </div>
 
-                {/* UGEL Filter */}
-                <div className="flex items-center gap-1.5">
-                  <span className="text-slate-500 font-medium">UGEL:</span>
-                  <select
-                    value={ugelFilter}
-                    onChange={(e) => setUgelFilter(e.target.value as 'all' | UGELCode)}
-                    className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium"
-                  >
-                    <option value="all">Todas las UGEL</option>
-                    <option value="UGEL 01">UGEL 01 (SJM, VES, VMT)</option>
-                    <option value="UGEL 02">UGEL 02 (Rímac, SMP)</option>
-                    <option value="UGEL 03">UGEL 03 (San Isidro, Lince)</option>
-                    <option value="UGEL 04">UGEL 04 (Comas)</option>
-                    <option value="UGEL 05">UGEL 05 (SJL)</option>
-                    <option value="UGEL 06">UGEL 06 (Ate)</option>
-                    <option value="UGEL 07">UGEL 07 (Miraflores, Surco)</option>
-                  </select>
-                </div>
-
-                {(priorityFilter !== 'all' || statusFilter !== 'all' || ugelFilter !== 'all' || origenFilter !== 'all' || searchQuery) && (
-                  <button
-                    onClick={() => {
-                      setPriorityFilter('all');
-                      setStatusFilter('all');
-                      setUgelFilter('all');
-                      setOrigenFilter('all');
-                      setSearchQuery('');
-                    }}
-                    className="px-2.5 py-1.5 text-slate-500 hover:text-slate-900 text-xs font-medium cursor-pointer"
-                  >
-                    Restablecer
-                  </button>
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedTicket(ticket);
+                            }}
+                            className="px-3 py-1.5 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+                          >
+                            <span>Atender</span>
+                            <ChevronRight className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
               </div>
             </div>
+          )}
 
-            {/* Tickets Table / List */}
-            <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-xs">
-              <div className="px-6 py-3 border-b border-slate-200 bg-slate-50/70 flex items-center justify-between text-xs font-semibold text-slate-600">
-                <span>Lista de Solicitudes y Tickets de Soporte ({filteredTickets.length})</span>
-                <span className="text-slate-400 font-normal">Haga clic en una fila para gestionar y testear con VMware</span>
+          {/* Section: Cisco Packet Tracer Network Topology (TOPOLOGIA.pkt) */}
+          {activeSection === 'packet-tracer' && (
+            <PacketTracerTopology onTriggerNetworkIncident={handleAddNewTicket} />
+          )}
+
+          {/* Section 3: Priority Selector Showcase & SLA Guidelines */}
+          {activeSection === 'priorities' && (
+            <div className="space-y-6">
+              <div className="p-5 rounded-2xl bg-white border border-slate-200">
+                <div className="flex items-center gap-2">
+                  <Sliders className="w-5 h-5 text-indigo-600" />
+                  <h1 className="text-lg font-bold text-slate-900">
+                    Selector de Nivel de Prioridad para Personal de TI (SLA Matrix)
+                  </h1>
+                </div>
+                <p className="text-xs text-slate-500 mt-1 max-w-3xl">
+                  Componente interactivo diseñado para categorizar incidentes en 4 niveles (Low, Medium, High, Urgent) conforme a las directivas tecnológicas de la DRELM y tiempos máximos de intervención de mesa de ayuda en UGEL 07.
+                </p>
               </div>
 
-              {filteredTickets.length === 0 ? (
-                <div className="p-12 text-center space-y-3">
-                  <Info className="w-8 h-8 text-slate-400 mx-auto" />
-                  <h3 className="text-sm font-semibold text-slate-900">
-                    No se encontraron tickets con los filtros seleccionados
-                  </h3>
-                  <p className="text-xs text-slate-500 max-w-sm mx-auto">
-                    Intente cambiar la prioridad seleccionada o registre un nuevo incidente usando el botón superior.
-                  </p>
+              {/* Live Interactive Sandbox */}
+              <div className="p-6 rounded-2xl bg-white border border-slate-200 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h2 className="text-sm font-bold text-slate-900">
+                      Demostración Interactiva del Selector de Prioridad
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      Haga clic en cualquiera de las 4 tarjetas para probar el comportamiento reactivo y cálculo de SLA:
+                    </p>
+                  </div>
                   <button
-                    onClick={() => {
-                      setPriorityFilter('all');
-                      setStatusFilter('all');
-                      setUgelFilter('all');
-                      setSearchQuery('');
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
+                    onClick={() => setIsNewTicketModalOpen(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors cursor-pointer"
                   >
-                    Limpiar Filtros
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Probar en Formulario de Ticket</span>
                   </button>
                 </div>
-              ) : (
-                <div className="divide-y divide-slate-100">
-                  {filteredTickets.map((ticket) => (
-                    <div
-                      key={ticket.id}
-                      onClick={() => setSelectedTicket(ticket)}
-                      className="p-4 hover:bg-slate-50/80 transition-colors cursor-pointer flex flex-col md:flex-row md:items-center justify-between gap-4"
-                    >
-                      {/* Left: Code, School, Title */}
-                      <div className="space-y-1.5 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
-                            {ticket.code}
-                          </span>
-                          {ticket.origen === 'AUTOMATICO' ? (
-                            <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-0.5">
-                              <Zap className="w-2.5 h-2.5 fill-current" />
-                              <span>Zabbix SNMP</span>
-                            </span>
-                          ) : (
-                            <span className="text-[10px] font-medium px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
-                              Manual
-                            </span>
-                          )}
-                          <span className="text-slate-300">·</span>
-                          <span className="text-xs font-semibold text-indigo-700">
-                            {ticket.ugel}
-                          </span>
-                          <span className="text-slate-300">·</span>
-                          <span className="text-xs text-slate-600">
-                            {ticket.schoolName}
-                          </span>
-                          <span className="text-slate-300">·</span>
-                          <span className="text-xs text-slate-400">
-                            {ticket.classroomLab}
-                          </span>
-                        </div>
 
-                        <h3 className="text-sm font-bold text-slate-900 hover:text-indigo-600 transition-colors">
-                          {ticket.title}
-                        </h3>
+                <PrioritySelector value={sandboxPriority} onChange={setSandboxPriority} />
 
-                        <p className="text-xs text-slate-500 line-clamp-1">
-                          {ticket.description}
-                        </p>
-
-                        <div className="flex items-center gap-3 text-[11px] text-slate-400 pt-1">
-                          <span>Reportado por: {ticket.reporterName} ({ticket.reporterRole})</span>
-                          <span>·</span>
-                          <span className="font-mono">{ticket.createdAt}</span>
-                          {ticket.vmwareEnv && (
-                            <>
-                              <span>·</span>
-                              <span className="inline-flex items-center gap-1 text-indigo-600 font-medium">
-                                <Server className="w-3 h-3" />
-                                <span>{ticket.vmwareEnv.hypervisor}</span>
-                              </span>
-                            </>
-                          )}
-                        </div>
-                      </div>
-
-                      {/* Right: Priority, Status, Action */}
-                      <div className="flex items-center gap-3 shrink-0 self-end md:self-center">
-                        <div className="flex flex-col items-end gap-1">
-                          {getPriorityBadge(ticket.priority)}
-                          {getStatusBadge(ticket.status)}
-                        </div>
-
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setSelectedTicket(ticket);
-                          }}
-                          className="px-3 py-1.5 text-xs font-medium text-slate-700 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
-                        >
-                          <span>Atender</span>
-                          <ChevronRight className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
+                {/* Technical Breakdown of the selected Priority */}
+                <div className="mt-4 p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2 text-xs">
+                  <span className="font-bold text-slate-900 block">
+                    Criterios Técnicos para Especialistas de Soporte UGEL 07:
+                  </span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-slate-700">
+                    <div>
+                      <strong>Tiempo Máximo de Primera Respuesta:</strong>{' '}
+                      <span className="font-mono font-semibold">
+                        {Math.max(1, Math.floor(PRIORITY_CONFIGS[sandboxPriority].slaHours / 4))} hora(s)
+                      </span>
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* Section: Cisco Packet Tracer Network Topology (TOPOLOGIA.pkt) */}
-        {activeSection === 'packet-tracer' && (
-          <PacketTracerTopology onTriggerNetworkIncident={handleAddNewTicket} />
-        )}
-
-        {/* Section 2: VMware Compatibility Test Workbench */}
-        {activeSection === 'vmware' && (
-          <div className="space-y-6">
-            <div className="p-5 rounded-2xl bg-white border border-slate-200">
-              <div className="flex items-center gap-2">
-                <Server className="w-5 h-5 text-indigo-600" />
-                <h1 className="text-lg font-bold text-slate-900">
-                  Laboratorio de Pruebas de Compatibilidad VMware
-                </h1>
-              </div>
-              <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-                Entorno interactivo para simular el arranque, microcódigo de CPU VT-x/AMD-V, controladores VMXNET3 y descriptores .vmx de imágenes OVA destinadas a las instituciones educativas de Lima Metropolitana.
-              </p>
-            </div>
-
-            <VMwareTester />
-          </div>
-        )}
-
-        {/* Section 3: Priority Selector Showcase & SLA Guidelines */}
-        {activeSection === 'priorities' && (
-          <div className="space-y-6">
-            <div className="p-5 rounded-2xl bg-white border border-slate-200">
-              <div className="flex items-center gap-2">
-                <Sliders className="w-5 h-5 text-indigo-600" />
-                <h1 className="text-lg font-bold text-slate-900">
-                  Selector de Nivel de Prioridad para Personal de TI (SLA Matrix)
-                </h1>
-              </div>
-              <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-                Componente interactivo diseñado para categorizar incidentes en 4 niveles (Low, Medium, High, Urgent) conforme a las directivas tecnológicas de la DRELM y tiempos máximos de intervención de mesa de ayuda.
-              </p>
-            </div>
-
-            {/* Live Interactive Sandbox */}
-            <div className="p-6 rounded-2xl bg-white border border-slate-200 space-y-4">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-bold text-slate-900">
-                    Demostración Interactiva del Selector de Prioridad
-                  </h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    Haga clic en cualquiera de las 4 tarjetas para probar el comportamiento reactivo y cálculo de SLA:
-                  </p>
-                </div>
-                <button
-                  onClick={() => setIsNewTicketModalOpen(true)}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 rounded-lg transition-colors cursor-pointer"
-                >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Probar en Formulario de Ticket</span>
-                </button>
-              </div>
-
-              <PrioritySelector value={sandboxPriority} onChange={setSandboxPriority} />
-
-              {/* Technical Breakdown of the selected Priority */}
-              <div className="mt-4 p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2 text-xs">
-                <span className="font-bold text-slate-900 block">
-                  Criterios Técnicos para Especialistas de Soporte UGEL:
-                </span>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-slate-700">
-                  <div>
-                    <strong>Tiempo Máximo de Primera Respuesta:</strong>{' '}
-                    <span className="font-mono font-semibold">
-                      {Math.max(1, Math.floor(PRIORITY_CONFIGS[sandboxPriority].slaHours / 4))} hora(s)
-                    </span>
-                  </div>
-                  <div>
-                    <strong>Tiempo Máximo de Solución Definitiva (SLA):</strong>{' '}
-                    <span className="font-mono font-semibold text-indigo-600">
-                      {PRIORITY_CONFIGS[sandboxPriority].slaHours} horas
-                    </span>
-                  </div>
-                  <div className="md:col-span-2">
-                    <strong>Impacto en Aulas de Innovación (AIP / CRT):</strong>{' '}
-                    <span>{PRIORITY_CONFIGS[sandboxPriority].impactLevel}</span>
-                  </div>
-                  <div className="md:col-span-2">
-                    <strong>Acción recomendada en el hipervisor VMware:</strong>{' '}
-                    <span>
-                      {sandboxPriority === 'urgent'
-                        ? 'Acceso inmediato vía consola remota ESXi, verificación de logs de kernel vmkernel y conmutación por error (Failover).'
-                        : sandboxPriority === 'high'
-                        ? 'Ejecución del test de compatibilidad VMware y reconfiguración de adaptadores vSwitch en el lote de computadoras afectadas.'
-                        : sandboxPriority === 'medium'
-                        ? 'Diagnóstico del puesto individual, reinstalación de VMware Tools y ajuste de resolución SVGA.'
-                        : 'Actualización programada de plantillas OVA en el repositorio central de la institución.'}
-                    </span>
+                    <div>
+                      <strong>Tiempo Máximo de Solución Definitiva (SLA):</strong>{' '}
+                      <span className="font-mono font-semibold text-indigo-600">
+                        {PRIORITY_CONFIGS[sandboxPriority].slaHours} horas
+                      </span>
+                    </div>
+                    <div className="md:col-span-2">
+                      <strong>Impacto en Aulas de Innovación (AIP / CRT):</strong>{' '}
+                      <span>{PRIORITY_CONFIGS[sandboxPriority].impactLevel}</span>
+                    </div>
+                    <div className="md:col-span-2">
+                      <strong>Acción recomendada en infraestructura:</strong>{' '}
+                      <span>
+                        {sandboxPriority === 'urgent'
+                          ? 'Acceso inmediato a consola remota del switch central, verificación de enlace de fibra y conmutación por error (Failover).'
+                          : sandboxPriority === 'high'
+                          ? 'Diagnóstico del switch de distribución del pabellón y reconfiguración de subred en el lote de computadoras afectadas.'
+                          : sandboxPriority === 'medium'
+                          ? 'Diagnóstico del puesto individual, verificación de cableado UTP Cat6 y ajuste de controlador de red.'
+                          : 'Actualización programada de software educativo en el repositorio de la institución.'}
+                      </span>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
 
-            {/* Comparative Table of Priorities */}
-            <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
-              <div className="px-6 py-4 border-b border-slate-200">
-                <h3 className="text-sm font-bold text-slate-900">
-                  Tabla Comparativa de Prioridades de Mesa de Ayuda Escolar
-                </h3>
+              {/* Comparative Table of Priorities */}
+              <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden">
+                <div className="px-6 py-4 border-b border-slate-200">
+                  <h3 className="text-sm font-bold text-slate-900">
+                    Tabla Comparativa de Prioridades de Mesa de Ayuda Escolar
+                  </h3>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold">
+                      <tr>
+                        <th className="px-6 py-3">Nivel (Esp / Eng)</th>
+                        <th className="px-6 py-3">SLA Resolución</th>
+                        <th className="px-6 py-3">Alcance de Alumnos</th>
+                        <th className="px-6 py-3">Escenario Típico (UGEL 07)</th>
+                        <th className="px-6 py-3">Canal de Escalamiento</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-700">
+                      <tr className="hover:bg-slate-50">
+                        <td className="px-6 py-3 font-bold text-sky-700">Baja / Low</td>
+                        <td className="px-6 py-3 font-mono font-semibold">&lt; 48 horas</td>
+                        <td className="px-6 py-3">0 alumnos afectados</td>
+                        <td className="px-6 py-3">Consultas de configuración de plantillas Scratch / Python.</td>
+                        <td className="px-6 py-3">Mesa de ayuda digital / Correo</td>
+                      </tr>
+                      <tr className="hover:bg-slate-50">
+                        <td className="px-6 py-3 font-bold text-emerald-700">Media / Medium</td>
+                        <td className="px-6 py-3 font-mono font-semibold">&lt; 24 horas</td>
+                        <td className="px-6 py-3">1 a 3 alumnos</td>
+                        <td className="px-6 py-3">Puesto individual con parpadeo o equipo congelado en Lab AIP.</td>
+                        <td className="px-6 py-3">Coordinador CIST local</td>
+                      </tr>
+                      <tr className="hover:bg-slate-50">
+                        <td className="px-6 py-3 font-bold text-amber-700">Alta / High</td>
+                        <td className="px-6 py-3 font-mono font-semibold">&lt; 8 horas</td>
+                        <td className="px-6 py-3">Aula completa (30+ alumnos)</td>
+                        <td className="px-6 py-3">Falla de switch de distribución o sin conexión a internet en AIP.</td>
+                        <td className="px-6 py-3">Especialista TI UGEL 07 presencial</td>
+                      </tr>
+                      <tr className="hover:bg-slate-50">
+                        <td className="px-6 py-3 font-bold text-rose-700">Urgente / Urgent</td>
+                        <td className="px-6 py-3 font-mono font-semibold">&lt; 2 horas</td>
+                        <td className="px-6 py-3">Colegio completo / Jornada censal</td>
+                        <td className="px-6 py-3">Caída del enlace principal de fibra durante evaluaciones MINEDU.</td>
+                        <td className="px-6 py-3">Equipo de Guardia Rápida UGEL 07 / DRELM</td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold">
-                    <tr>
-                      <th className="px-6 py-3">Nivel (Esp / Eng)</th>
-                      <th className="px-6 py-3">SLA Resolución</th>
-                      <th className="px-6 py-3">Alcance de Alumnos</th>
-                      <th className="px-6 py-3">Escenario Típico en Lima</th>
-                      <th className="px-6 py-3">Canal de Escalamiento</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100 text-slate-700">
-                    <tr className="hover:bg-slate-50">
-                      <td className="px-6 py-3 font-bold text-sky-700">Baja / Low</td>
-                      <td className="px-6 py-3 font-mono font-semibold">&lt; 48 horas</td>
-                      <td className="px-6 py-3">0 alumnos afectados</td>
-                      <td className="px-6 py-3">Consultas de configuración de plantillas Scratch / Python.</td>
-                      <td className="px-6 py-3">Mesa de ayuda digital / Correo</td>
-                    </tr>
-                    <tr className="hover:bg-slate-50">
-                      <td className="px-6 py-3 font-bold text-emerald-700">Media / Medium</td>
-                      <td className="px-6 py-3 font-mono font-semibold">&lt; 24 horas</td>
-                      <td className="px-6 py-3">1 a 3 alumnos</td>
-                      <td className="px-6 py-3">Puesto individual con parpadeo o VM congelada en Lab AIP.</td>
-                      <td className="px-6 py-3">Coordinador CIST local</td>
-                    </tr>
-                    <tr className="hover:bg-slate-50">
-                      <td className="px-6 py-3 font-bold text-amber-700">Alta / High</td>
-                      <td className="px-6 py-3 font-mono font-semibold">&lt; 8 horas</td>
-                      <td className="px-6 py-3">Aula completa (30+ alumnos)</td>
-                      <td className="px-6 py-3">VT-x desactivado en BIOS masivo o sin conexión a internet en AIP.</td>
-                      <td className="px-6 py-3">Especialista TI UGEL presencial</td>
-                    </tr>
-                    <tr className="hover:bg-slate-50">
-                      <td className="px-6 py-3 font-bold text-rose-700">Urgente / Urgent</td>
-                      <td className="px-6 py-3 font-mono font-semibold">&lt; 2 horas</td>
-                      <td className="px-6 py-3">Colegio completo / Jornada censal</td>
-                      <td className="px-6 py-3">Caída del servidor ESXi central durante pruebas oficiales MINEDU.</td>
-                      <td className="px-6 py-3">Equipo de Guardia Rápida DRELM</td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
+            </div>
+          )}
+
+          {/* Section: Zonal Blackout & Network Monitor */}
+          {activeSection === 'siniestros' && (
+            <ZonalBlackoutMonitor
+              onAutoCreateTicket={handleAddNewTicket}
+              onOpenTicket={(t) => setSelectedTicket(t)}
+              existingTickets={tickets}
+            />
+          )}
+
+          {/* Section 4: Thesis Validation Panel */}
+          {activeSection === 'thesis' && (
+            <ThesisValidationPanel tickets={tickets} />
+          )}
+
+          {/* Section 5: Architecture & Systems Docs */}
+          {activeSection === 'architecture' && (
+            <ArchitectureDocs />
+          )}
+        </main>
+
+        {/* Footer */}
+        <footer className="mt-auto border-t border-slate-200 bg-white py-4 px-6 text-xs text-slate-500">
+          <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
+            <div>
+              Help Desk TI Automatizado & Monitoreo Proactivo de Red · Jurisdicción UGEL 07 (Lima Sur)
+            </div>
+            <div className="flex items-center gap-2">
+              <span>Proyecto de Titulación Profesional de Ingeniería</span>
             </div>
           </div>
-        )}
+        </footer>
+      </div>
 
-        {/* Section: Zonal Blackout & Silent Disconnection Monitor (Zabbix NOC) */}
-        {activeSection === 'siniestros' && (
-          <ZonalBlackoutMonitor
-            onAutoCreateTicket={handleAddNewTicket}
-            onOpenTicket={(t) => setSelectedTicket(t)}
-            existingTickets={tickets}
-          />
-        )}
-
-        {/* Section 4: Thesis Validation Panel */}
-        {activeSection === 'thesis' && (
-          <ThesisValidationPanel tickets={tickets} />
-        )}
-
-        {/* Section 5: Architecture, MySQL Schema & Real VMware Integration */}
-        {activeSection === 'architecture' && (
-          <ArchitectureDocs />
-        )}
-      </main>
-
-      {/* Ticket Submission Modal with Priority Selector */}
+      {/* Ticket Submission Modal */}
       <TicketSubmissionModal
         isOpen={isNewTicketModalOpen}
         onClose={() => setIsNewTicketModalOpen(false)}
@@ -1094,18 +1255,6 @@ export default function App() {
         associatedTicket={criticalBlackoutAlert?.ticket || selectedTicket}
         onLogCallToTicket={handleLogCallToTicket}
       />
-
-      {/* Footer */}
-      <footer className="mt-auto border-t border-slate-200 bg-white py-4 px-6 text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
-          <div>
-            Help Desk TI Automatizado & Módulo de Validación VMware · Lima Metropolitana (DRELM / UGEL 01 - 07)
-          </div>
-          <div className="flex items-center gap-2">
-            <span>Proyecto de Titulación Profesional de Ingeniería</span>
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

@@ -33,10 +33,10 @@ export const TicketSubmissionModal: React.FC<TicketSubmissionModalProps> = ({
   const [selectedPriority, setSelectedPriority] = useState<Priority>('medium');
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
-  const [category, setCategory] = useState<TicketCategory>('vmware_virtualization');
-  const [ugel, setUgel] = useState<UGELCode>(currentUser?.ugel || 'UGEL 03');
+  const [category, setCategory] = useState<TicketCategory>('networking_connectivity');
+  const [ugel, setUgel] = useState<UGELCode>('UGEL 07');
   const [schoolName, setSchoolName] = useState(
-    currentUser?.institucionSede || UGEL_SCHOOLS['UGEL 03'][0]
+    UGEL_SCHOOLS['UGEL 07'][0]
   );
   const [customSchool, setCustomSchool] = useState('');
   const [reporterName, setReporterName] = useState(
@@ -250,21 +250,12 @@ export const TicketSubmissionModal: React.FC<TicketSubmissionModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
               <div>
                 <label className="block text-slate-600 dark:text-slate-400 font-medium mb-1">
-                  Jurisdicción UGEL <span className="text-rose-500">*</span>
+                  Jurisdicción UGEL
                 </label>
-                <select
-                  value={ugel}
-                  onChange={(e) => setUgel(e.target.value as UGELCode)}
-                  className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium focus:ring-1 focus:ring-indigo-500"
-                >
-                  <option value="UGEL 01">UGEL 01 (SJM, VES, VMT)</option>
-                  <option value="UGEL 02">UGEL 02 (Rímac, SMP, Los Olivos)</option>
-                  <option value="UGEL 03">UGEL 03 (Cercado, Breña, San Isidro, Lince)</option>
-                  <option value="UGEL 04">UGEL 04 (Comas, Carabayllo, Pte Piedra)</option>
-                  <option value="UGEL 05">UGEL 05 (SJL, El Agustino)</option>
-                  <option value="UGEL 06">UGEL 06 (Ate, Chosica, Chaclacayo)</option>
-                  <option value="UGEL 07">UGEL 07 (San Borja, Surco, Miraflores)</option>
-                </select>
+                <div className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold flex items-center justify-between">
+                  <span>UGEL 07</span>
+                  <span className="text-[10px] text-slate-500 font-normal">Lima Sur</span>
+                </div>
               </div>
 
               <div className="md:col-span-2">

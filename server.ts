@@ -76,7 +76,30 @@ interface StoredWebhookTicket {
   };
 }
 
-const receivedTickets: StoredWebhookTicket[] = [];
+const CACHE_FILE = path.join('/tmp', 'zabbix_tickets_cache.json');
+
+function loadCachedTickets(): StoredWebhookTicket[] {
+  try {
+    if (fs.existsSync(CACHE_FILE)) {
+      const raw = fs.readFileSync(CACHE_FILE, 'utf-8');
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (err) {
+    console.warn('[Server] Error loading cache:', err);
+  }
+  return [];
+}
+
+function persistCachedTickets(tickets: StoredWebhookTicket[]) {
+  try {
+    fs.writeFileSync(CACHE_FILE, JSON.stringify(tickets.slice(0, 50), null, 2), 'utf-8');
+  } catch (err) {
+    console.warn('[Server] Error persisting cache:', err);
+  }
+}
+
+let receivedTickets: StoredWebhookTicket[] = loadCachedTickets();
 
 // Helper function to map Zabbix severity to EduDesk priority
 function mapZabbixSeverityToPriority(severity?: string): 'low' | 'medium' | 'high' | 'urgent' {
@@ -130,14 +153,51 @@ app.post(['/api/webhooks/zabbix', '/api/webhooks/zabbix/'], (req, res) => {
       }
     }
 
-    console.log('[Zabbix Webhook Received]:', JSON.stringify(payload, null, 2));
+    const hostName =
+      payload?.host_name ||
+      payload?.hostname ||
+      payload?.host ||
+      payload?.HOST ||
+      payload?.equipo ||
+      payload?.target ||
+      'PC-ALUMNO-VMWARE';
 
-    const hostName = payload.host_name || payload.hostname || payload.host || payload.equipo || 'PC-ALUMNO-01';
-    const hostIp = payload.ip || payload.host_ip || payload.ipDispositivo || '192.168.30.101';
-    const eventName = payload.event_name || payload.trigger_name || payload.titulo || payload.title || payload.mensaje || 'Alerta de Monitoreo Proactivo Zabbix';
-    const severity = payload.severity || payload.severidad || 'High';
-    const itemValue = payload.item_value || payload.valor || payload.metric || 'Estado Anómalo Detectado';
-    const description = payload.description || payload.descripcion || `Alerta emitida por Zabbix Server 7.0: ${eventName}. Equipo: ${hostName} (${hostIp}). Métrica: ${itemValue}`;
+    const hostIp =
+      payload?.ip ||
+      payload?.host_ip ||
+      payload?.ipDispositivo ||
+      payload?.IP ||
+      payload?.ip_address ||
+      '192.168.30.101';
+
+    const eventName =
+      payload?.event_name ||
+      payload?.trigger_name ||
+      payload?.titulo ||
+      payload?.title ||
+      payload?.event ||
+      payload?.subject ||
+      payload?.mensaje ||
+      'Alerta de Monitoreo Proactivo Zabbix';
+
+    const severity =
+      payload?.severity ||
+      payload?.severidad ||
+      payload?.SEVERITY ||
+      payload?.event_severity ||
+      'High';
+
+    const itemValue =
+      payload?.item_value ||
+      payload?.valor ||
+      payload?.metric ||
+      payload?.item ||
+      'Estado Anómalo Detectado';
+
+    const description =
+      payload?.description ||
+      payload?.descripcion ||
+      `Alerta emitida por Zabbix Server 7.0: ${eventName}. Equipo: ${hostName} (${hostIp}). Métrica: ${itemValue}`;
 
     const priority = mapZabbixSeverityToPriority(severity);
     const now = new Date();
@@ -158,13 +218,13 @@ app.post(['/api/webhooks/zabbix', '/api/webhooks/zabbix/'], (req, res) => {
       category: hostName.toLowerCase().includes('switch') || hostName.toLowerCase().includes('router')
         ? 'networking_connectivity'
         : 'aip_hardware',
-      ugel: 'UGEL 03',
-      sede: 'I.E. Antenor Orrego Espinoza (Lab Central)',
-      schoolName: 'I.E. Antenor Orrego Espinoza',
+      ugel: 'UGEL 07',
+      sede: 'I.E. Juana Alarco de Dammert (Sede Miraflores)',
+      schoolName: 'I.E. Juana Alarco de Dammert (Miraflores)',
       reporterUserId: 'usr-zabbix-webhook',
-      reporterName: `Zabbix Agent (${hostName})`,
-      reporterRole: 'Telemetría Proactiva SNMP/Agent',
-      reporterEmail: 'zabbix-webhook@cibertec.edu.pe',
+      reporterName: `Sensor de Monitoreo (${hostName})`,
+      reporterRole: 'Telemetría Proactiva de Red',
+      reporterEmail: 'telemetria@ugel07.gob.pe',
       classroomLab: 'Laboratorio de Cómputo (VLAN 30)',
       createdAt: formattedDate,
       slaTargetHours: priority === 'urgent' ? 2 : priority === 'high' ? 8 : 24,
@@ -193,10 +253,12 @@ app.post(['/api/webhooks/zabbix', '/api/webhooks/zabbix/'], (req, res) => {
       ],
     };
 
+    receivedTickets = loadCachedTickets();
     receivedTickets.unshift(newTicket);
     if (receivedTickets.length > 50) {
       receivedTickets.pop();
     }
+    persistCachedTickets(receivedTickets);
 
     return res.status(200).json({
       status: 'success',
@@ -221,10 +283,11 @@ app.post(['/api/webhooks/zabbix', '/api/webhooks/zabbix/'], (req, res) => {
 
 // GET /api/tickets/recent (frontend polls this to pick up real Zabbix tickets)
 app.get('/api/tickets/recent', (_req, res) => {
+  const allTickets = loadCachedTickets();
   res.json({
     success: true,
-    count: receivedTickets.length,
-    tickets: receivedTickets,
+    count: allTickets.length,
+    tickets: allTickets,
   });
 });
 
