@@ -43,21 +43,25 @@ import {
   X,
   Bell,
   Menu,
+  HelpCircle,
 } from 'lucide-react';
 import { EmergencyPhoneModal } from './components/EmergencyPhoneModal';
 import { LoginPortal } from './components/LoginPortal';
 import { PacketTracerTopology } from './components/PacketTracerTopology';
+import { ZabbixConnectionModal } from './components/ZabbixConnectionModal';
+import { FAQSection } from './components/FAQSection';
 
 export default function App() {
   const { currentUser, logout, hasRole } = useAuth();
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isZabbixModalOpen, setIsZabbixModalOpen] = useState(false);
   const isGeneralUser = currentUser?.rol === 'DOCENTE' || currentUser?.rol === 'ALUMNO';
   const isTechnician = currentUser?.rol === 'TECNICO';
   const isAdmin = currentUser?.rol === 'ADMIN';
 
   const [activeSection, setActiveSection] = useState<
-    'tickets' | 'packet-tracer' | 'siniestros' | 'priorities' | 'thesis' | 'architecture'
+    'tickets' | 'packet-tracer' | 'siniestros' | 'priorities' | 'thesis' | 'architecture' | 'faq'
   >('tickets');
 
   // Audio chime for real-time alert reception
@@ -118,49 +122,64 @@ export default function App() {
     }
   }, [currentUser?.rol]);
 
-  // Sincronización en tiempo real con el backend de Webhooks de Zabbix
+  // Sincronización en tiempo real con el backend de Webhooks de Zabbix y Vercel
   React.useEffect(() => {
+    const handleIncomingTicketsList = (incoming: Ticket[]) => {
+      setTickets((prev) => {
+        const existingIds = new Set(prev.map((t) => t.id));
+        const newTickets = incoming.filter((t) => !existingIds.has(t.id));
+        if (newTickets.length > 0) {
+          setLatestZabbixAlert(newTickets[0]);
+          playAlertChime();
+          setOrigenFilter('all');
+          setPriorityFilter('all');
+          setStatusFilter('all');
+
+          newTickets.forEach((t) => {
+            if (
+              t.sinistroZonal ||
+              t.outageCause === 'CORTE_ELECTRICO_MASIVO' ||
+              t.telemetriaZabbix?.probableCausa === 'CORTE_ELECTRICO_MASIVO' ||
+              t.priority === 'urgent'
+            ) {
+              setCriticalBlackoutAlert({
+                ticket: t,
+                schoolName: t.schoolName,
+                ugel: t.ugel,
+                probableCausa: t.telemetriaZabbix?.probableCausa || 'CORTE_ELECTRICO_MASIVO',
+              });
+              setPhoneTargetSchool(t.schoolName);
+            }
+          });
+          return [...newTickets, ...prev];
+        }
+        return prev;
+      });
+    };
+
     const fetchRecentWebhookTickets = async () => {
+      // 1. Fetch from local backend
       try {
         const res = await fetch('/api/tickets/recent');
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.success && Array.isArray(data.tickets) && data.tickets.length > 0) {
-          setZabbixWebhookEventCount(data.count || data.tickets.length);
-          setTickets((prev) => {
-            const existingIds = new Set(prev.map((t) => t.id));
-            const newTickets = (data.tickets as Ticket[]).filter((t) => !existingIds.has(t.id));
-            if (newTickets.length > 0) {
-              setLatestZabbixAlert(newTickets[0]);
-              playAlertChime();
-              setOrigenFilter('all');
-              setPriorityFilter('all');
-              setStatusFilter('all');
-
-              newTickets.forEach((t) => {
-                if (
-                  t.sinistroZonal ||
-                  t.outageCause === 'CORTE_ELECTRICO_MASIVO' ||
-                  t.telemetriaZabbix?.probableCausa === 'CORTE_ELECTRICO_MASIVO' ||
-                  t.priority === 'urgent'
-                ) {
-                  setCriticalBlackoutAlert({
-                    ticket: t,
-                    schoolName: t.schoolName,
-                    ugel: t.ugel,
-                    probableCausa: t.telemetriaZabbix?.probableCausa || 'CORTE_ELECTRICO_MASIVO',
-                  });
-                  setPhoneTargetSchool(t.schoolName);
-                }
-              });
-              return [...newTickets, ...prev];
-            }
-            return prev;
-          });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.success && Array.isArray(data.tickets) && data.tickets.length > 0) {
+            setZabbixWebhookEventCount(data.count || data.tickets.length);
+            handleIncomingTicketsList(data.tickets as Ticket[]);
+          }
         }
-      } catch {
-        // Fallback silencioso
-      }
+      } catch {}
+
+      // 2. Also fetch from Vercel endpoint in case teammate sends to Vercel (Captura de pantalla)
+      try {
+        const vercelRes = await fetch('https://cibertec-titulacion.vercel.app/api/webhooks/zabbix');
+        if (vercelRes.ok) {
+          const vData = await vercelRes.json();
+          if (Array.isArray(vData.recentTickets) && vData.recentTickets.length > 0) {
+            handleIncomingTicketsList(vData.recentTickets as Ticket[]);
+          }
+        }
+      } catch {}
     };
 
     fetchRecentWebhookTickets();
@@ -286,9 +305,6 @@ export default function App() {
   };
 
   const filteredTickets = tickets.filter((t) => {
-    // Focus strictly on UGEL 07 as requested
-    if (t.ugel !== 'UGEL 07') return false;
-
     if (onlyMyTickets && currentUser && t.origen === 'MANUAL') {
       const isMine =
         t.reporterUserId === currentUser.id ||
@@ -437,16 +453,21 @@ export default function App() {
             </button>
           </div>
 
-          {/* Telemetry Status badge */}
-          <div className="flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200/80 text-[11px] text-emerald-700">
+          {/* Telemetry Status badge & connection helper */}
+          <button
+            type="button"
+            onClick={() => setIsZabbixModalOpen(true)}
+            title="Ver URL y configuración para conectar Zabbix en VMware"
+            className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 text-[11px] text-emerald-800 transition-colors cursor-pointer text-left"
+          >
             <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span className="font-medium">Telemetría de Red</span>
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+              <span className="font-semibold">Telemetría Zabbix</span>
             </div>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-mono">
-              En Línea
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-900 font-mono">
+              Configurar 📡
             </span>
-          </div>
+          </button>
 
           {/* Primary Action Button */}
           <button
@@ -564,6 +585,28 @@ export default function App() {
             <Server className="w-4 h-4 text-indigo-500" />
             <span>{isGeneralUser ? 'Memoria del Proyecto' : 'Arquitectura del Sistema'}</span>
           </button>
+
+          <button
+            onClick={() => {
+              setActiveSection('faq');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+              activeSection === 'faq'
+                ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <HelpCircle className="w-4 h-4 text-indigo-500" />
+              <span>Preguntas Frecuentes (FAQ)</span>
+            </div>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+              activeSection === 'faq' ? 'bg-indigo-200 text-indigo-900' : 'bg-slate-100 text-slate-600'
+            }`}>
+              8
+            </span>
+          </button>
         </nav>
 
         {/* User Footer Profile & Actions */}
@@ -607,52 +650,90 @@ export default function App() {
       {/* Main Content Area */}
       <div className="flex-1 flex flex-col min-w-0 min-h-screen">
         <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 py-6 space-y-6">
-          {/* Real-time Incident Alert Banner */}
+          {/* Señal de Alerta en Tiempo Real (Triggered automatically from VMware Zabbix) */}
           {latestZabbixAlert && (
-            <div className="p-4 rounded-2xl bg-gradient-to-r from-red-600 via-rose-600 to-indigo-900 text-white shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 border border-red-400">
-              <div className="flex items-center gap-3.5">
-                <div className="w-11 h-11 rounded-xl bg-white/20 flex items-center justify-center shrink-0 shadow-inner">
-                  <Bell className="w-6 h-6 text-white animate-pulse" />
-                </div>
-                <div className="space-y-0.5">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="px-2 py-0.5 rounded-full bg-white/25 text-white text-[10px] font-bold tracking-wider uppercase">
-                      🟢 Incidencia Detectada en Tiempo Real
-                    </span>
-                    <span className="font-mono text-xs font-bold text-amber-300">
-                      {latestZabbixAlert.code}
-                    </span>
-                    <span className="text-xs text-white/80">·</span>
-                    <span className="text-xs text-white/90">
-                      Sede: <strong>{latestZabbixAlert.schoolName}</strong>
-                    </span>
+            <div className="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
+              <div className="bg-white rounded-3xl max-w-lg w-full shadow-2xl border-2 border-red-500 overflow-hidden scale-100 animate-in zoom-in-95 duration-200">
+                {/* Header with Beacon Alert */}
+                <div className="bg-gradient-to-r from-red-600 via-rose-600 to-red-700 p-6 text-white text-center relative overflow-hidden">
+                  <div className="absolute -right-6 -top-6 w-32 h-32 bg-white/10 rounded-full blur-xl pointer-events-none" />
+                  <div className="w-14 h-14 mx-auto rounded-2xl bg-white/20 backdrop-blur-md flex items-center justify-center mb-3 shadow-inner ring-4 ring-white/30 animate-pulse">
+                    <Bell className="w-7 h-7 text-white" />
                   </div>
-                  <h4 className="text-sm font-bold text-white">
-                    {latestZabbixAlert.title}
-                  </h4>
-                  <p className="text-xs text-white/80 line-clamp-1">
-                    {latestZabbixAlert.description}
+                  <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/20 text-white text-[11px] font-bold uppercase tracking-wider mb-2">
+                    <Radio className="w-3.5 h-3.5 animate-ping text-white" />
+                    <span>Señal de Alerta en Tiempo Real</span>
+                  </div>
+                  <h3 className="text-xl font-black text-white leading-tight">
+                    Falla Detectada desde VMware Zabbix
+                  </h3>
+                  <p className="text-xs text-red-100 mt-1">
+                    Evento recibido y procesado por el Webhook de EduDesk
                   </p>
                 </div>
-              </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                <button
-                  onClick={() => {
-                    setSelectedTicket(latestZabbixAlert);
-                    setActiveSection('tickets');
-                  }}
-                  className="px-3.5 py-2 rounded-xl bg-white text-indigo-900 hover:bg-slate-100 text-xs font-bold transition-all shadow-md cursor-pointer"
-                >
-                  Ver Incidencia
-                </button>
-                <button
-                  onClick={() => setLatestZabbixAlert(null)}
-                  title="Descartar aviso"
-                  className="p-2 rounded-xl hover:bg-white/20 text-white transition-colors cursor-pointer"
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                {/* Body Details */}
+                <div className="p-6 space-y-4">
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3">
+                    <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                      <span className="text-xs font-medium text-slate-500">Ticket Generado</span>
+                      <span className="font-mono text-xs font-bold text-red-600 bg-red-50 border border-red-200 px-2.5 py-0.5 rounded-full">
+                        {latestZabbixAlert.code}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">Equipo / Host</span>
+                        <span className="font-semibold text-slate-800">{latestZabbixAlert.reporterName || 'PC-ALUMNO-01'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-slate-400 block">IP / Ubicación</span>
+                        <span className="font-mono font-medium text-slate-700">{latestZabbixAlert.classroomLab || '192.168.30.101'}</span>
+                      </div>
+                    </div>
+
+                    <div className="text-xs">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Evento Zabbix</span>
+                      <span className="font-bold text-slate-900 leading-snug block mt-0.5">
+                        {latestZabbixAlert.title}
+                      </span>
+                    </div>
+
+                    <div className="text-xs">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Métrica / Detalle</span>
+                      <p className="text-slate-600 text-xs mt-0.5 leading-relaxed bg-white p-2.5 rounded-xl border border-slate-200">
+                        {latestZabbixAlert.description}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center justify-between pt-1">
+                      <span className="text-xs font-medium text-slate-500">Prioridad Asignada:</span>
+                      <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200 uppercase">
+                        {latestZabbixAlert.priority} · SLA &lt; {latestZabbixAlert.slaTargetHours}h
+                      </span>
+                    </div>
+                  </div>
+
+                  <p className="text-center text-[11px] text-slate-500 font-medium">
+                    ✓ La incidencia ha sido insertada y actualizada automáticamente en el listado de tickets.
+                  </p>
+                </div>
+
+                {/* Footer with ONLY the "Aceptar" button as requested */}
+                <div className="p-5 bg-slate-50 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setLatestZabbixAlert(null);
+                      setActiveSection('tickets');
+                    }}
+                    className="w-full py-3.5 px-6 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm tracking-wide shadow-lg shadow-slate-900/20 active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-2"
+                  >
+                    <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                    <span>Aceptar</span>
+                  </button>
+                </div>
               </div>
             </div>
           )}
@@ -726,8 +807,29 @@ export default function App() {
           {/* Section 1: Tickets & Incidents Management */}
           {activeSection === 'tickets' && (
             <div className="space-y-6">
-              {/* Active User Role Banner */}
-              <div className={`p-4 rounded-2xl border transition-all ${
+              {/* Top Action Bar */}
+              <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">
+                    Panel Principal · Incidentes & Tickets
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] bg-indigo-100 text-indigo-800 font-bold">
+                    {filteredTickets.length} registros
+                  </span>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsZabbixModalOpen(true)}
+                  title="Ver URL y parámetros para conectar la máquina virtual de Zabbix"
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  <Server className="w-3.5 h-3.5 text-indigo-600" />
+                  <span>📡 Conexión VMware Zabbix</span>
+                </button>
+              </div>
+                  {/* Active User Role Banner */}
+                  <div className={`p-4 rounded-2xl border transition-all ${
                 isGeneralUser
                   ? 'border-indigo-200 bg-gradient-to-r from-indigo-50/70 to-white'
                   : isAdmin
@@ -798,15 +900,6 @@ export default function App() {
                         >
                           <Radio className="w-3.5 h-3.5 animate-pulse" />
                           <span>Monitoreo de Siniestros</span>
-                        </button>
-
-                        <button
-                          onClick={triggerSimulatedNetworkAlert}
-                          title="Simula la recepción de una alerta de red de laboratorio"
-                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg font-semibold bg-amber-500 hover:bg-amber-600 text-white cursor-pointer shadow-xs transition-colors"
-                        >
-                          <Zap className="w-3.5 h-3.5 fill-current" />
-                          <span>⚡ Simular Falla de Red</span>
                         </button>
                       </div>
                     )}
@@ -920,11 +1013,16 @@ export default function App() {
                     </select>
                   </div>
 
-                  {/* UGEL Fixed Scope Badge (UGEL 07 exclusive) */}
-                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-50 border border-indigo-200 text-indigo-800 text-xs font-semibold">
-                    <Building className="w-3.5 h-3.5 text-indigo-600" />
-                    <span>Jurisdicción: UGEL 07</span>
-                  </div>
+                  {/* Zabbix Connection helper button */}
+                  <button
+                    type="button"
+                    onClick={() => setIsZabbixModalOpen(true)}
+                    title="Ver URL y comando cURL para enviar fallas desde VMware Zabbix"
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
+                  >
+                    <Server className="w-3.5 h-3.5" />
+                    <span>Conectar VMware / Zabbix</span>
+                  </button>
 
                   {(priorityFilter !== 'all' || statusFilter !== 'all' || origenFilter !== 'all' || searchQuery) && (
                     <button
@@ -1058,6 +1156,9 @@ export default function App() {
               </div>
             </div>
           )}
+
+          {/* Section: Preguntas Frecuentes (FAQ) */}
+          {activeSection === 'faq' && <FAQSection />}
 
           {/* Section: Cisco Packet Tracer Network Topology (TOPOLOGIA.pkt) */}
           {activeSection === 'packet-tracer' && (
@@ -1254,6 +1355,13 @@ export default function App() {
         targetSchoolName={phoneTargetSchool}
         associatedTicket={criticalBlackoutAlert?.ticket || selectedTicket}
         onLogCallToTicket={handleLogCallToTicket}
+      />
+
+      {/* Zabbix & VMware Live Connection Setup Modal */}
+      <ZabbixConnectionModal
+        isOpen={isZabbixModalOpen}
+        onClose={() => setIsZabbixModalOpen(false)}
+        onTicketInjected={handleAddNewTicket}
       />
     </div>
   );

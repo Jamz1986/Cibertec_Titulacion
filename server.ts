@@ -101,6 +101,20 @@ function persistCachedTickets(tickets: StoredWebhookTicket[]) {
 
 let receivedTickets: StoredWebhookTicket[] = loadCachedTickets();
 
+interface WebhookLogEntry {
+  id: string;
+  timestamp: string;
+  method: string;
+  path: string;
+  ip: string;
+  hostName?: string;
+  eventName?: string;
+  status: number;
+  message: string;
+}
+
+let webhookLogs: WebhookLogEntry[] = [];
+
 // Helper function to map Zabbix severity to EduDesk priority
 function mapZabbixSeverityToPriority(severity?: string): 'low' | 'medium' | 'high' | 'urgent' {
   if (!severity) return 'high';
@@ -114,167 +128,221 @@ function mapZabbixSeverityToPriority(severity?: string): 'low' | 'medium' | 'hig
 }
 
 // ==========================================
-// 1. Zabbix Webhook API Endpoints
+// 1. Zabbix Webhook API Endpoints & Logic
 // ==========================================
 
-// Preflight OPTIONS for CORS
-app.options(['/api/webhooks/zabbix', '/api/webhooks/zabbix/'], (_req, res) => {
+function handleZabbixWebhook(req: express.Request, res: express.Response) {
+  // Set explicit CORS headers on every response
   res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept');
-  res.sendStatus(204);
-});
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, PUT, PATCH, DELETE');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
 
-// GET /api/webhooks/zabbix (informational & health for browser tests)
-app.get(['/api/webhooks/zabbix', '/api/webhooks/zabbix/'], (_req, res) => {
-  res.json({
-    status: 'online',
-    service: 'EduDesk - Receptor Webhook Zabbix Server 7.0 LTS',
-    method: 'POST',
-    endpoint: '/api/webhooks/zabbix',
-    acceptedFormats: ['application/json', 'application/x-www-form-urlencoded', 'text/plain'],
-    receivedCount: receivedTickets.length,
-    recentTickets: receivedTickets.slice(0, 10),
-  });
-});
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
 
-// POST /api/webhooks/zabbix (Core Webhook Receiver from Zabbix Server)
-app.post(['/api/webhooks/zabbix', '/api/webhooks/zabbix/'], (req, res) => {
-  try {
-    let payload = req.body;
-
-    // Handle plain text or stringified JSON payload
-    if (typeof payload === 'string') {
-      try {
-        payload = JSON.parse(payload);
-      } catch (parseErr) {
-        console.warn('[Zabbix Webhook] Parsing raw body:', payload);
-        payload = { rawMessage: payload };
-      }
-    }
-
-    const hostName =
-      payload?.host_name ||
-      payload?.hostname ||
-      payload?.host ||
-      payload?.HOST ||
-      payload?.equipo ||
-      payload?.target ||
-      'PC-ALUMNO-VMWARE';
-
-    const hostIp =
-      payload?.ip ||
-      payload?.host_ip ||
-      payload?.ipDispositivo ||
-      payload?.IP ||
-      payload?.ip_address ||
-      '192.168.30.101';
-
-    const eventName =
-      payload?.event_name ||
-      payload?.trigger_name ||
-      payload?.titulo ||
-      payload?.title ||
-      payload?.event ||
-      payload?.subject ||
-      payload?.mensaje ||
-      'Alerta de Monitoreo Proactivo Zabbix';
-
-    const severity =
-      payload?.severity ||
-      payload?.severidad ||
-      payload?.SEVERITY ||
-      payload?.event_severity ||
-      'High';
-
-    const itemValue =
-      payload?.item_value ||
-      payload?.valor ||
-      payload?.metric ||
-      payload?.item ||
-      'Estado Anómalo Detectado';
-
-    const description =
-      payload?.description ||
-      payload?.descripcion ||
-      `Alerta emitida por Zabbix Server 7.0: ${eventName}. Equipo: ${hostName} (${hostIp}). Métrica: ${itemValue}`;
-
-    const priority = mapZabbixSeverityToPriority(severity);
-    const now = new Date();
-    const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-      now.getDate()
-    ).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
-
-    const newTicket: StoredWebhookTicket = {
-      id: `t-zbx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-      code: `TK-${now.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      title: `Alerta Zabbix: ${eventName}`,
-      titulo: `Alerta Zabbix: ${eventName}`,
-      description: description,
-      descripcion: description,
-      origen: 'AUTOMATICO',
-      priority: priority,
-      status: 'open',
-      category: hostName.toLowerCase().includes('switch') || hostName.toLowerCase().includes('router')
-        ? 'networking_connectivity'
-        : 'aip_hardware',
-      ugel: 'UGEL 07',
-      sede: 'I.E. Juana Alarco de Dammert (Sede Miraflores)',
-      schoolName: 'I.E. Juana Alarco de Dammert (Miraflores)',
-      reporterUserId: 'usr-zabbix-webhook',
-      reporterName: `Sensor de Monitoreo (${hostName})`,
-      reporterRole: 'Telemetría Proactiva de Red',
-      reporterEmail: 'telemetria@ugel07.gob.pe',
-      classroomLab: 'Laboratorio de Cómputo (VLAN 30)',
-      createdAt: formattedDate,
-      slaTargetHours: priority === 'urgent' ? 2 : priority === 'high' ? 8 : 24,
-      telemetriaZabbix: {
-        lastGaspReceived: false,
-        heartbeatConsecutiveFails: 3,
-        correlationConfidence: 96,
-        ipDispositivo: hostIp,
-        puertoAfectado: hostName.toLowerCase().includes('switch') ? 'GigabitEthernet0/2 (Trunk)' : 'eth0 / ens33 (10050)',
-        latenciaMs: hostName.toLowerCase().includes('cpu') ? 14 : 0,
-        perdidaPaquetesPct: hostName.toLowerCase().includes('unreachable') ? 100 : 0,
-        anchoBandaUtilizadoMbps: 12.5,
-        ultimoSondeoSnmp: 'Hace 2 seg',
-        probableCausa: hostName.toLowerCase().includes('switch')
-          ? 'CORTE_ENLACE_TRUNK_SWITCH'
-          : 'FALLA_LOCAL_AISLADA',
-      },
-      comments: [
-        {
-          id: `c-zbx-${Date.now()}`,
-          author: 'Zabbix Webhook Controller (Spring/Node)',
-          role: 'Automatización de Incidencias',
-          text: `Evento procesado automáticamente desde Zabbix Server 7.0 LTS. Host: ${hostName} [${hostIp}]. Evento: ${eventName}. Métrica: ${itemValue}. Severidad: ${severity}.`,
-          timestamp: 'Hace instantes',
-        },
-      ],
-    };
-
-    receivedTickets = loadCachedTickets();
-    receivedTickets.unshift(newTicket);
-    if (receivedTickets.length > 50) {
-      receivedTickets.pop();
-    }
-    persistCachedTickets(receivedTickets);
-
+  if (req.method === 'GET') {
     return res.status(200).json({
-      status: 'success',
-      message: 'Ticket de incidencia creado exitosamente en EduDesk',
-      ticketId: newTicket.id,
-      ticketCode: newTicket.code,
-      ticket: newTicket,
-    });
-  } catch (err: any) {
-    console.error('[Error in /api/webhooks/zabbix]:', err);
-    return res.status(500).json({
-      status: 'error',
-      message: 'Error al procesar el webhook de Zabbix',
-      error: err?.message || String(err),
+      status: 'online',
+      service: 'EduDesk - Receptor Webhook Zabbix Server 7.0 LTS',
+      method: 'POST',
+      endpointsAceptados: ['/api/webhooks/zabbix', '/api/webhooks/zabbix/', '/api/webhook', '/webhook', '/zabbix', '/'],
+      receivedCount: receivedTickets.length,
+      recentTickets: receivedTickets.slice(0, 10),
     });
   }
+
+  if (req.method === 'POST') {
+    try {
+      let payload = req.body;
+
+      // Handle plain text or stringified JSON payload
+      if (typeof payload === 'string') {
+        try {
+          payload = JSON.parse(payload);
+        } catch {
+          payload = { rawMessage: payload };
+        }
+      }
+
+      const hostName =
+        payload?.host_name ||
+        payload?.hostname ||
+        payload?.host ||
+        payload?.HOST ||
+        payload?.equipo ||
+        payload?.target ||
+        'servidor-zabbix';
+
+      const hostIp =
+        payload?.ip ||
+        payload?.host_ip ||
+        payload?.ipDispositivo ||
+        payload?.IP ||
+        payload?.ip_address ||
+        '192.168.40.10';
+
+      const eventName =
+        payload?.event_name ||
+        payload?.trigger_name ||
+        payload?.event ||
+        payload?.subject ||
+        payload?.mensaje ||
+        'Windows: Zabbix agent is not available';
+
+      const severity =
+        payload?.severity ||
+        payload?.severidad ||
+        payload?.SEVERITY ||
+        payload?.event_severity ||
+        'High';
+
+      const itemValue =
+        payload?.item_value ||
+        payload?.valor ||
+        payload?.metric ||
+        payload?.item ||
+        '0';
+
+      const title =
+        payload?.titulo ||
+        payload?.title ||
+        `Alerta Zabbix: Falla en ${hostName} (${eventName})`;
+
+      const description =
+        payload?.descripcion ||
+        payload?.description ||
+        `Alerta emitida por Zabbix Server 7.0 (Ubuntu): ${eventName}. Host: ${hostName} (${hostIp}). Métrica: ${itemValue}. Severidad: ${severity}.`;
+
+      const priority = mapZabbixSeverityToPriority(severity);
+      const now = new Date();
+      const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
+        now.getDate()
+      ).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+
+      const newTicket: StoredWebhookTicket = {
+        id: `t-zbx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        code: `TK-${now.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+        title: title,
+        titulo: title,
+        description: description,
+        descripcion: description,
+        origen: 'AUTOMATICO',
+        priority: priority,
+        status: 'open',
+        category: hostName.toLowerCase().includes('switch') || hostName.toLowerCase().includes('router')
+          ? 'networking_connectivity'
+          : 'aip_hardware',
+        ugel: payload?.ugel || 'UGEL 07',
+        sede: payload?.sede || `VMware Lab · ${hostName} (${hostIp})`,
+        schoolName: payload?.schoolName || `VMware Lab · ${hostName}`,
+        reporterUserId: 'usr-zabbix-webhook',
+        reporterName: `Agente Zabbix (${hostName})`,
+        reporterRole: 'Telemetría Proactiva de Red',
+        reporterEmail: 'telemetria@ugel07.gob.pe',
+        classroomLab: `Estación Virtual: ${hostName} · IP ${hostIp}`,
+        createdAt: formattedDate,
+        slaTargetHours: priority === 'urgent' ? 2 : priority === 'high' ? 8 : 24,
+        telemetriaZabbix: {
+          lastGaspReceived: false,
+          heartbeatConsecutiveFails: 3,
+          correlationConfidence: 96,
+          ipDispositivo: hostIp,
+          puertoAfectado: hostName.toLowerCase().includes('switch') ? 'GigabitEthernet0/2 (Trunk)' : 'eth0 / ens33 (10050)',
+          latenciaMs: hostName.toLowerCase().includes('cpu') ? 14 : 0,
+          perdidaPaquetesPct: hostName.toLowerCase().includes('unreachable') ? 100 : 0,
+          anchoBandaUtilizadoMbps: 12.5,
+          ultimoSondeoSnmp: 'Hace 2 seg',
+          probableCausa: hostName.toLowerCase().includes('switch')
+            ? 'CORTE_ENLACE_TRUNK_SWITCH'
+            : 'FALLA_LOCAL_AISLADA',
+        },
+        comments: [
+          {
+            id: `c-zbx-${Date.now()}`,
+            author: 'Zabbix Webhook Controller (Ubuntu / VMware)',
+            role: 'Automatización de Incidencias',
+            text: `Evento procesado automáticamente desde Zabbix Server 7.0 LTS. Host: ${hostName} [${hostIp}]. Evento: ${eventName}. Métrica: ${itemValue}. Severidad: ${severity}.`,
+            timestamp: 'Hace instantes',
+          },
+        ],
+      };
+
+      receivedTickets = loadCachedTickets();
+      receivedTickets.unshift(newTicket);
+      if (receivedTickets.length > 50) {
+        receivedTickets.pop();
+      }
+      persistCachedTickets(receivedTickets);
+
+      // Record in live logs
+      const logEntry: WebhookLogEntry = {
+        id: `log-${Date.now()}`,
+        timestamp: formattedDate,
+        method: req.method,
+        path: req.path,
+        ip: req.ip || req.socket.remoteAddress || '192.168.40.10',
+        hostName: hostName,
+        eventName: eventName,
+        status: 200,
+        message: `Ticket ${newTicket.code} creado exitosamente para host ${hostName}`,
+      };
+      webhookLogs.unshift(logEntry);
+      if (webhookLogs.length > 30) webhookLogs.pop();
+
+      console.log(`[Zabbix Webhook] HTTP 200 OK -> Created ${newTicket.code} for ${hostName} (${eventName})`);
+
+      return res.status(200).json({
+        status: 'success',
+        message: 'Ticket de incidencia creado exitosamente en EduDesk',
+        ticketId: newTicket.id,
+        ticketCode: newTicket.code,
+        ticket: newTicket,
+      });
+    } catch (err: any) {
+      console.error('[Error in Zabbix Webhook]:', err);
+      return res.status(500).json({
+        status: 'error',
+        message: 'Error al procesar el webhook de Zabbix',
+        error: err?.message || String(err),
+      });
+    }
+  }
+
+  return res.status(405).json({ error: 'Method Not Allowed' });
+}
+
+// Mount Zabbix Webhook on multiple standard paths
+app.all(
+  [
+    '/api/webhooks/zabbix',
+    '/api/webhooks/zabbix/',
+    '/api/webhook',
+    '/api/webhook/',
+    '/webhook',
+    '/webhook/',
+    '/zabbix',
+    '/api/zabbix',
+  ],
+  handleZabbixWebhook
+);
+
+// Fallback: If Zabbix posts to the root '/' path (because URL was configured without /api/webhooks/zabbix)
+app.post('/', (req, res, next) => {
+  if (req.body && (req.body.host_name || req.body.event_name || req.body.hostname || req.body.origen || req.body.severity)) {
+    console.log('[Zabbix Webhook] Detected POST to root / with Zabbix payload. Routing to handler.');
+    return handleZabbixWebhook(req, res);
+  }
+  next();
+});
+
+// Logs endpoint for live inspection modal in frontend
+app.get('/api/webhooks/logs', (_req, res) => {
+  res.json({
+    success: true,
+    count: webhookLogs.length,
+    logs: webhookLogs,
+  });
 });
 
 // ==========================================

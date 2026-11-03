@@ -74,7 +74,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         payload?.HOST ||
         payload?.equipo ||
         payload?.target ||
-        'PC-ALUMNO-VMWARE';
+        'servidor-zabbix';
 
       const hostIp =
         payload?.ip ||
@@ -82,17 +82,15 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         payload?.ipDispositivo ||
         payload?.IP ||
         payload?.ip_address ||
-        '192.168.30.101';
+        '192.168.40.10';
 
       const eventName =
         payload?.event_name ||
         payload?.trigger_name ||
-        payload?.titulo ||
-        payload?.title ||
         payload?.event ||
         payload?.subject ||
         payload?.mensaje ||
-        'Alerta de Monitoreo Proactivo Zabbix';
+        'Windows: Zabbix agent is not available';
 
       const severity =
         payload?.severity ||
@@ -106,12 +104,17 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         payload?.valor ||
         payload?.metric ||
         payload?.item ||
-        'Saturación / Falla de Red Detectada';
+        '0';
+
+      const title =
+        payload?.titulo ||
+        payload?.title ||
+        `Alerta Zabbix: Falla en ${hostName} (${eventName})`;
 
       const description =
-        payload?.description ||
         payload?.descripcion ||
-        `Alerta emitida por Zabbix Server 7.0: ${eventName}. Equipo: ${hostName} (${hostIp}). Métrica: ${itemValue}`;
+        payload?.description ||
+        `Alerta emitida por Zabbix Server 7.0 (Ubuntu): ${eventName}. Host: ${hostName} (${hostIp}). Métrica: ${itemValue}. Severidad: ${severity}.`;
 
       const now = new Date();
       const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
@@ -124,8 +127,8 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       const ticket = {
         id: `t-zbx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
         code: `TK-${now.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-        title: `Alerta Zabbix: ${eventName}`,
-        titulo: `Alerta Zabbix: ${eventName}`,
+        title: title,
+        titulo: title,
         description: description,
         descripcion: description,
         origen: 'AUTOMATICO',
@@ -134,14 +137,14 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         category: hostName.toLowerCase().includes('switch') || hostName.toLowerCase().includes('router')
           ? 'networking_connectivity'
           : 'aip_hardware',
-        ugel: 'UGEL 07',
-        sede: 'I.E. Juana Alarco de Dammert (Sede Miraflores)',
-        schoolName: 'I.E. Juana Alarco de Dammert (Miraflores)',
+        ugel: payload?.ugel || 'UGEL 07',
+        sede: payload?.sede || `VMware Lab · ${hostName} (${hostIp})`,
+        schoolName: payload?.schoolName || `VMware Lab · ${hostName}`,
         reporterUserId: 'usr-zabbix-webhook',
-        reporterName: `Sensor de Monitoreo (${hostName})`,
+        reporterName: `Agente Zabbix (${hostName})`,
         reporterRole: 'Telemetría Proactiva de Red',
         reporterEmail: 'telemetria@ugel07.gob.pe',
-        classroomLab: 'Laboratorio de Cómputo (VLAN 30)',
+        classroomLab: `Estación Virtual: ${hostName} · IP ${hostIp}`,
         createdAt: formattedDate,
         slaTargetHours: priority === 'urgent' ? 2 : 8,
         telemetriaZabbix: {

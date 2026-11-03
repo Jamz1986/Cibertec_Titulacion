@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/api/webhooks/zabbix",
+      "destination": "/api/webhooks/zabbix"
+    },
+    {
+      "source": "/api/tickets/recent",
+      "destination": "/api/webhooks/zabbix"
+    },
+    {
+      "source": "/((?!api/).*)",
+      "destination": "/index.html"
+    }
+  ]
+}
