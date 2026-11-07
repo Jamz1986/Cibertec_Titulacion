@@ -18,6 +18,22 @@ export type UGELCode =
   | 'UGEL 06'
   | 'UGEL 07';
 
+export type UGEL07District =
+  | 'Miraflores'
+  | 'San Borja'
+  | 'Santiago de Surco'
+  | 'San Luis'
+  | 'Barranco'
+  | 'Chorrillos'
+  | 'Surquillo';
+
+export type FailureType =
+  | 'Red y Conectividad'
+  | 'Hardware Aula / AIP'
+  | 'Servidor y Servicios'
+  | 'Suministro Eléctrico'
+  | 'Software Educativo';
+
 export type UserRole = 'DOCENTE' | 'ALUMNO' | 'TECNICO' | 'ADMIN';
 
 export interface AppUser {
@@ -143,4 +159,14 @@ export interface Ticket {
   sinistroZonal?: boolean;
   outageCause?: OutageCause;
   telemetriaZabbix?: ZabbixTelemetry;
+  // Campos de Sincronización y Dashboard UGEL 07
+  distrito?: UGEL07District;
+  tipoFalla?: FailureType;
+  vmTimestamp?: string; // e.g. "2026-11-02 09:58:21 (GMT-5 / UTC-5)"
+  horaIncidenciaVM?: string; // e.g. "09:58:21 (GMT-5)"
+  zonaHorariaVM?: string; // e.g. "GMT-5 (UTC-5 Perú / VMware)"
+  // Escenarios de Titulación para el Jurado
+  casoNumero?: 1 | 2 | 3;
+  casoNombre?: string;
+  casoHistoriaJurado?: string;
 }

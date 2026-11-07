@@ -44,12 +44,15 @@ import {
   Bell,
   Menu,
   HelpCircle,
+  BarChart3,
+  MapPin,
 } from 'lucide-react';
 import { EmergencyPhoneModal } from './components/EmergencyPhoneModal';
 import { LoginPortal } from './components/LoginPortal';
 import { PacketTracerTopology } from './components/PacketTracerTopology';
 import { ZabbixConnectionModal } from './components/ZabbixConnectionModal';
 import { FAQSection } from './components/FAQSection';
+import { DistrictFailureDashboard } from './components/DistrictFailureDashboard';
 
 export default function App() {
   const { currentUser, logout, hasRole } = useAuth();
@@ -61,7 +64,7 @@ export default function App() {
   const isAdmin = currentUser?.rol === 'ADMIN';
 
   const [activeSection, setActiveSection] = useState<
-    'tickets' | 'packet-tracer' | 'siniestros' | 'priorities' | 'thesis' | 'architecture' | 'faq'
+    'tickets' | 'packet-tracer' | 'siniestros' | 'distritos-report' | 'priorities' | 'thesis' | 'architecture' | 'faq'
   >('tickets');
 
   // Audio chime for real-time alert reception
@@ -92,7 +95,14 @@ export default function App() {
       const saved = localStorage.getItem('edudesk_tickets_cache');
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const existingCodes = new Set(parsed.map((t: Ticket) => t.code || t.id));
+          const missingDemos = INITIAL_TICKETS.filter((t) => t.casoNumero && !existingCodes.has(t.code) && !existingCodes.has(t.id));
+          if (missingDemos.length > 0) {
+            return [...missingDemos, ...parsed];
+          }
+          return parsed;
+        }
       }
     } catch {}
     return INITIAL_TICKETS;
@@ -131,9 +141,12 @@ export default function App() {
         if (newTickets.length > 0) {
           setLatestZabbixAlert(newTickets[0]);
           playAlertChime();
+          setActiveSection('tickets');
           setOrigenFilter('all');
           setPriorityFilter('all');
           setStatusFilter('all');
+          setSearchQuery('');
+          setOnlyMyTickets(false);
 
           newTickets.forEach((t) => {
             if (
@@ -541,6 +554,26 @@ export default function App() {
 
           <button
             onClick={() => {
+              setActiveSection('distritos-report');
+              setIsMobileMenuOpen(false);
+            }}
+            className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+              activeSection === 'distritos-report'
+                ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70'
+                : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+            }`}
+          >
+            <div className="flex items-center gap-2.5">
+              <BarChart3 className="w-4 h-4 text-indigo-500" />
+              <span>Fallas por Distrito (UGEL 07)</span>
+            </div>
+            <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700">
+              7
+            </span>
+          </button>
+
+          <button
+            onClick={() => {
               setActiveSection('priorities');
               setIsMobileMenuOpen(false);
             }}
@@ -682,6 +715,53 @@ export default function App() {
                       </span>
                     </div>
 
+                    {/* Banner de Caso de Titulación para el Jurado si corresponde */}
+                    {latestZabbixAlert.casoNumero && (
+                      <div className="p-3.5 rounded-xl bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 border border-indigo-200/80 space-y-1 shadow-xs">
+                        <div className="flex items-center justify-between">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-600 text-white uppercase tracking-wider">
+                            ★ {latestZabbixAlert.casoNombre || `Caso ${latestZabbixAlert.casoNumero}`}
+                          </span>
+                          <span className="text-[10px] font-mono font-bold text-indigo-700">
+                            Escenario de Demostración
+                          </span>
+                        </div>
+                        {latestZabbixAlert.casoHistoriaJurado && (
+                          <p className="text-xs text-indigo-950 font-medium leading-relaxed pt-1">
+                            <strong>Historia para el Jurado:</strong> "{latestZabbixAlert.casoHistoriaJurado}"
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Sincronización Horaria y Distrito UGEL 07 */}
+                    <div className="grid grid-cols-2 gap-2 text-xs bg-amber-50/80 p-3 rounded-xl border border-amber-200">
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-amber-800 flex items-center gap-1">
+                          <Clock className="w-3 h-3 text-amber-600" />
+                          <span>Hora Máquina Virtual (VM)</span>
+                        </span>
+                        <span className="font-mono font-bold text-slate-900 block mt-0.5 text-xs">
+                          {latestZabbixAlert.horaIncidenciaVM || latestZabbixAlert.vmTimestamp || latestZabbixAlert.createdAt}
+                        </span>
+                        <span className="text-[10px] text-amber-700 font-medium block">
+                          GMT-5 (UTC-5 Perú / VMware)
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] uppercase font-bold text-amber-800 flex items-center gap-1">
+                          <MapPin className="w-3 h-3 text-amber-600" />
+                          <span>Distrito UGEL 07</span>
+                        </span>
+                        <span className="font-bold text-slate-900 block mt-0.5 text-xs">
+                          {latestZabbixAlert.distrito || 'Miraflores'}
+                        </span>
+                        <span className="text-[10px] text-amber-700 font-medium block">
+                          {latestZabbixAlert.tipoFalla || 'Hardware Aula / AIP'}
+                        </span>
+                      </div>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div>
                         <span className="text-[10px] uppercase font-bold text-slate-400 block">Equipo / Host</span>
@@ -694,14 +774,14 @@ export default function App() {
                     </div>
 
                     <div className="text-xs">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Evento Zabbix</span>
-                      <span className="font-bold text-slate-900 leading-snug block mt-0.5">
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Problema Detectado en Zabbix</span>
+                      <span className="font-bold text-slate-900 leading-snug block mt-0.5 text-sm">
                         {latestZabbixAlert.title}
                       </span>
                     </div>
 
                     <div className="text-xs">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Métrica / Detalle</span>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Métrica y Detalle de la Falla</span>
                       <p className="text-slate-600 text-xs mt-0.5 leading-relaxed bg-white p-2.5 rounded-xl border border-slate-200">
                         {latestZabbixAlert.description}
                       </p>
@@ -716,7 +796,7 @@ export default function App() {
                   </div>
 
                   <p className="text-center text-[11px] text-slate-500 font-medium">
-                    ✓ La incidencia ha sido insertada y actualizada automáticamente en el listado de tickets.
+                    ✓ La incidencia ha sido insertada en la posición superior del listado de tickets.
                   </p>
                 </div>
 
@@ -727,6 +807,11 @@ export default function App() {
                     onClick={() => {
                       setLatestZabbixAlert(null);
                       setActiveSection('tickets');
+                      setOrigenFilter('all');
+                      setPriorityFilter('all');
+                      setStatusFilter('all');
+                      setSearchQuery('');
+                      setOnlyMyTickets(false);
                     }}
                     className="w-full py-3.5 px-6 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm tracking-wide shadow-lg shadow-slate-900/20 active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-2"
                   >
@@ -817,16 +902,6 @@ export default function App() {
                     {filteredTickets.length} registros
                   </span>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={() => setIsZabbixModalOpen(true)}
-                  title="Ver URL y parámetros para conectar la máquina virtual de Zabbix"
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-slate-300 bg-white hover:bg-slate-100 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
-                >
-                  <Server className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>📡 Conexión VMware Zabbix</span>
-                </button>
               </div>
                   {/* Active User Role Banner */}
                   <div className={`p-4 rounded-2xl border transition-all ${
@@ -1013,17 +1088,6 @@ export default function App() {
                     </select>
                   </div>
 
-                  {/* Zabbix Connection helper button */}
-                  <button
-                    type="button"
-                    onClick={() => setIsZabbixModalOpen(true)}
-                    title="Ver URL y comando cURL para enviar fallas desde VMware Zabbix"
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold shadow-xs transition-colors cursor-pointer"
-                  >
-                    <Server className="w-3.5 h-3.5" />
-                    <span>Conectar VMware / Zabbix</span>
-                  </button>
-
                   {(priorityFilter !== 'all' || statusFilter !== 'all' || origenFilter !== 'all' || searchQuery) && (
                     <button
                       onClick={() => {
@@ -1082,6 +1146,18 @@ export default function App() {
                             <span className="font-mono text-xs font-bold text-slate-900 bg-slate-100 px-2 py-0.5 rounded">
                               {ticket.code}
                             </span>
+                            {ticket.casoNumero && (
+                              <span className={`font-mono text-[10px] font-bold px-2 py-0.5 rounded-md border flex items-center gap-1 shadow-xs ${
+                                ticket.casoNumero === 1
+                                  ? 'bg-rose-100 text-rose-800 border-rose-300'
+                                  : ticket.casoNumero === 2
+                                  ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                  : 'bg-indigo-100 text-indigo-800 border-indigo-300'
+                              }`}>
+                                <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
+                                <span>Caso {ticket.casoNumero}: {ticket.casoNombre?.replace(/Caso \d: /, '') || 'Demostración'}</span>
+                              </span>
+                            )}
                             {ticket.origen === 'AUTOMATICO' ? (
                               <span className="font-mono text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 border border-purple-200 flex items-center gap-0.5">
                                 <Zap className="w-2.5 h-2.5 fill-current" />
@@ -1096,6 +1172,15 @@ export default function App() {
                             <span className="text-xs font-semibold text-indigo-700">
                               {ticket.ugel}
                             </span>
+                            {ticket.distrito && (
+                              <>
+                                <span className="text-slate-300">·</span>
+                                <span className="inline-flex items-center gap-1 text-[11px] font-bold px-1.5 py-0.5 rounded bg-sky-50 text-sky-800 border border-sky-200">
+                                  <MapPin className="w-2.5 h-2.5 text-sky-600" />
+                                  <span>{ticket.distrito}</span>
+                                </span>
+                              </>
+                            )}
                             <span className="text-slate-300">·</span>
                             <span className="text-xs text-slate-600">
                               {ticket.schoolName}
@@ -1114,10 +1199,28 @@ export default function App() {
                             {ticket.description}
                           </p>
 
-                          <div className="flex items-center gap-3 text-[11px] text-slate-400 pt-1">
+                          {ticket.casoHistoriaJurado && (
+                            <div className="text-[11px] font-medium text-slate-700 bg-amber-50/80 border border-amber-200/90 rounded-lg px-2.5 py-1 flex items-start gap-1.5">
+                              <span className="font-bold text-amber-900 shrink-0">🎓 Historia Jurado:</span>
+                              <span className="italic text-slate-700">&ldquo;{ticket.casoHistoriaJurado}&rdquo;</span>
+                            </div>
+                          )}
+
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 pt-1">
                             <span>Reportado por: {ticket.reporterName} ({ticket.reporterRole})</span>
                             <span>·</span>
-                            <span className="font-mono">{ticket.createdAt}</span>
+                            <span className="font-mono inline-flex items-center gap-1 bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded text-[11px] font-semibold border border-slate-200">
+                              <Clock className="w-3 h-3 text-indigo-500" />
+                              <span>Hora VM: {ticket.horaIncidenciaVM || ticket.vmTimestamp || ticket.createdAt} (GMT-5 / UTC-5)</span>
+                            </span>
+                            {ticket.tipoFalla && (
+                              <>
+                                <span>·</span>
+                                <span className="text-indigo-700 bg-indigo-50 px-1.5 py-0.5 rounded border border-indigo-100 font-semibold">
+                                  {ticket.tipoFalla}
+                                </span>
+                              </>
+                            )}
                             {ticket.vmwareEnv && (
                               <>
                                 <span>·</span>
@@ -1300,6 +1403,14 @@ export default function App() {
               onAutoCreateTicket={handleAddNewTicket}
               onOpenTicket={(t) => setSelectedTicket(t)}
               existingTickets={tickets}
+            />
+          )}
+
+          {/* Section: Dashboard Interactivo de Fallas por Distrito (UGEL 07) */}
+          {activeSection === 'distritos-report' && (
+            <DistrictFailureDashboard
+              tickets={tickets}
+              onSelectTicket={(t) => setSelectedTicket(t)}
             />
           )}
 

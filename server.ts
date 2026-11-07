@@ -62,6 +62,14 @@ interface StoredWebhookTicket {
     text: string;
     timestamp: string;
   }>;
+  distrito?: 'Miraflores' | 'San Borja' | 'Santiago de Surco' | 'San Luis' | 'Barranco' | 'Chorrillos' | 'Surquillo';
+  tipoFalla?: 'Red y Conectividad' | 'Hardware Aula / AIP' | 'Servidor y Servicios' | 'Suministro Eléctrico' | 'Software Educativo';
+  vmTimestamp?: string;
+  horaIncidenciaVM?: string;
+  zonaHorariaVM?: string;
+  casoNumero?: 1 | 2 | 3;
+  casoNombre?: string;
+  casoHistoriaJurado?: string;
   telemetriaZabbix?: {
     lastGaspReceived: boolean;
     heartbeatConsecutiveFails: number;
@@ -204,56 +212,189 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         payload?.item ||
         '0';
 
-      const title =
-        payload?.titulo ||
-        payload?.title ||
-        `Alerta Zabbix: Falla en ${hostName} (${eventName})`;
+      // =========================================================================
+      // Detección y Clasificación de los 3 Escenarios de Titulación para el Jurado
+      // =========================================================================
+      const normEvent = `${eventName} ${payload?.titulo || ''} ${payload?.descripcion || ''}`.toLowerCase();
 
-      const description =
-        payload?.descripcion ||
-        payload?.description ||
-        `Alerta emitida por Zabbix Server 7.0 (Ubuntu): ${eventName}. Host: ${hostName} (${hostIp}). Métrica: ${itemValue}. Severidad: ${severity}.`;
+      let casoNumero: 1 | 2 | 3 | undefined = undefined;
+      let casoNombre: string | undefined = undefined;
+      let casoHistoriaJurado: string | undefined = undefined;
+      let computedTitle = '';
+      let computedDesc = '';
+      let computedPriority: 'urgent' | 'high' | 'medium' | 'low' = mapZabbixSeverityToPriority(severity);
+      let computedTipoFalla: 'Red y Conectividad' | 'Hardware Aula / AIP' | 'Servidor y Servicios' | 'Suministro Eléctrico' | 'Software Educativo' = 'Hardware Aula / AIP';
 
-      const priority = mapZabbixSeverityToPriority(severity);
-      const now = new Date();
-      const formattedDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(
-        now.getDate()
-      ).padStart(2, '0')} ${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+      if (
+        normEvent.includes('not available') ||
+        normEvent.includes('nodata') ||
+        normEvent.includes('unreachable') ||
+        normEvent.includes('desconexion') ||
+        normEvent.includes('cable') ||
+        normEvent.includes('desconexión') ||
+        normEvent.includes('30s')
+      ) {
+        // Caso 1: Desconexión Física de Red (Disponibilidad / Red)
+        casoNumero = 1;
+        casoNombre = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
+        casoHistoriaJurado = 'Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio.';
+        computedTitle = `[Caso 1: Desconexión Física de Red] Windows: Zabbix agent is not available (or nodata for 30s) · ${hostName}`;
+        computedDesc = `Incidencia de Disponibilidad de Red: Pérdida total de enlace en ${hostName} (${hostIp}). Historia para el jurado: Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio. Alerta en Zabbix: Windows: Zabbix agent is not available (or nodata for 30s). Métrica: ${itemValue}. Severidad: Crítica.`;
+        computedPriority = 'urgent';
+        computedTipoFalla = 'Red y Conectividad';
+      } else if (
+        normEvent.includes('cpu') ||
+        normEvent.includes('procesador') ||
+        normEvent.includes('>95') ||
+        normEvent.includes('utilization') ||
+        normEvent.includes('sobrecarga')
+      ) {
+        // Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)
+        casoNumero = 2;
+        casoNombre = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
+        casoHistoriaJurado = 'Un alumno ejecuta un proceso en bucle infinito o software no autorizado que bloquea el procesador del equipo.';
+        computedTitle = `[Caso 2: Sobrecarga de Procesador] High CPU utilization (>95%) · ${hostName}`;
+        computedDesc = `Alerta Preventiva de Rendimiento: Saturación crítica de CPU en ${hostName} (${hostIp}). Métrica: ${itemValue || '98.4%'}. Historia para el jurado: Un alumno ejecuta un proceso en bucle infinito o software no autorizado que bloquea el procesador del equipo. El monitoreo advierte la saturación de recursos antes de que el equipo se colapse.`;
+        computedPriority = 'high';
+        computedTipoFalla = 'Hardware Aula / AIP';
+      } else if (
+        normEvent.includes('service is not running') ||
+        normEvent.includes('service') ||
+        normEvent.includes('servicio') ||
+        normEvent.includes('agent service')
+      ) {
+        // Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)
+        casoNumero = 3;
+        casoNombre = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
+        casoHistoriaJurado = 'Falla inesperada del servicio de monitoreo o intento de detener los procesos de control en la estación de trabajo.';
+        computedTitle = `[Caso 3: Interrupción de Servicio Crítico] Zabbix agent service is not running · ${hostName}`;
+        computedDesc = `Alerta de Estado de Agente: Servicio de monitoreo detenido en ${hostName} (${hostIp}). Historia para el jurado: Falla inesperada del servicio de monitoreo o intento de detener los procesos de control en la estación de trabajo. Evidencia el tiempo de respuesta directo del Webhook y la activación del banner sonoro en vivo en la mesa de ayuda.`;
+        computedPriority = 'high';
+        computedTipoFalla = 'Servidor y Servicios';
+      } else {
+        // Alerta genérica con nombre del evento real
+        computedTitle = `Alerta Zabbix: ${eventName} · ${hostName}`;
+        computedDesc = `Alerta emitida por Zabbix Server 7.0 (Ubuntu): ${eventName}. Host: ${hostName} (${hostIp}). Métrica: ${itemValue}. Severidad: ${severity}.`;
+        computedPriority = mapZabbixSeverityToPriority(severity);
+        computedTipoFalla = hostName.toLowerCase().includes('switch') || hostName.toLowerCase().includes('router')
+          ? 'Red y Conectividad'
+          : 'Hardware Aula / AIP';
+      }
+
+      // Sincronización horaria estricta con la Máquina Virtual (VMware / Zabbix Server) en GMT-5 (UTC-5)
+      const parsePeruTime = (rawClock?: any, rawTime?: any, rawDate?: any) => {
+        let dateObj = new Date();
+        if (rawClock) {
+          const num = Number(rawClock);
+          if (!isNaN(num) && num > 0) {
+            dateObj = new Date(num > 1e11 ? num : num * 1000);
+          }
+        }
+        const formatter = new Intl.DateTimeFormat('es-PE', {
+          timeZone: 'America/Lima',
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+          hour12: false,
+        });
+        const parts = formatter.formatToParts(dateObj);
+        const map: Record<string, string> = {};
+        for (const p of parts) map[p.type] = p.value;
+
+        const dateFormatted = `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`;
+        const timeOnly = `${map.hour}:${map.minute}:${map.second} (GMT-5)`;
+        
+        let finalTimeOnly = rawTime ? `${rawTime} (GMT-5)` : timeOnly;
+        let finalTimestamp = rawDate && rawTime
+          ? `${rawDate} ${rawTime} (GMT-5 / UTC-5)`
+          : `${dateFormatted} (GMT-5 / UTC-5)`;
+        
+        return {
+          formattedDate: dateFormatted,
+          timeOnly: finalTimeOnly,
+          vmTimestamp: finalTimestamp,
+        };
+      };
+
+      const timeSync = parsePeruTime(
+        payload?.clock || payload?.timestamp || payload?.EVENT_CLOCK,
+        payload?.event_time || payload?.time || payload?.EVENT_TIME,
+        payload?.event_date || payload?.date || payload?.EVENT_DATE
+      );
+
+      // Determinar Distrito de la UGEL 07 (Miraflores, San Borja, Santiago de Surco, San Luis, Barranco, Chorrillos, Surquillo)
+      const detectDistrict = (): 'Miraflores' | 'San Borja' | 'Santiago de Surco' | 'San Luis' | 'Barranco' | 'Chorrillos' | 'Surquillo' => {
+        const text = `${payload?.distrito || ''} ${payload?.district || ''} ${payload?.sede || ''} ${payload?.schoolName || ''} ${hostName} ${hostIp}`.toLowerCase();
+        if (text.includes('surco') || text.includes('santiago')) return 'Santiago de Surco';
+        if (text.includes('borja')) return 'San Borja';
+        if (text.includes('luis')) return 'San Luis';
+        if (text.includes('barranco')) return 'Barranco';
+        if (text.includes('chorrillos')) return 'Chorrillos';
+        if (text.includes('surquillo')) return 'Surquillo';
+        if (text.includes('miraflores')) return 'Miraflores';
+
+        // Por subred IP de Laboratorios escolares UGEL 07
+        if (hostIp.includes('.30.')) return 'Miraflores';
+        if (hostIp.includes('.40.')) return 'San Borja';
+        if (hostIp.includes('.50.')) return 'Santiago de Surco';
+        if (hostIp.includes('.60.')) return 'Surquillo';
+        if (hostIp.includes('.70.')) return 'Chorrillos';
+        if (hostIp.includes('.80.')) return 'Barranco';
+        if (hostIp.includes('.90.')) return 'San Luis';
+        return 'Miraflores';
+      };
+
+      const distritoAsignado = detectDistrict();
 
       const newTicket: StoredWebhookTicket = {
         id: `t-zbx-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
-        code: `TK-${now.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-        title: title,
-        titulo: title,
-        description: description,
-        descripcion: description,
+        code: `TK-${new Date().getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
+        title: computedTitle,
+        titulo: computedTitle,
+        description: computedDesc,
+        descripcion: computedDesc,
         origen: 'AUTOMATICO',
-        priority: priority,
+        priority: computedPriority,
         status: 'open',
-        category: hostName.toLowerCase().includes('switch') || hostName.toLowerCase().includes('router')
+        category: computedTipoFalla === 'Red y Conectividad'
           ? 'networking_connectivity'
+          : computedTipoFalla === 'Servidor y Servicios'
+          ? 'school_server'
           : 'aip_hardware',
-        ugel: payload?.ugel || 'UGEL 07',
-        sede: payload?.sede || `VMware Lab · ${hostName} (${hostIp})`,
-        schoolName: payload?.schoolName || `VMware Lab · ${hostName}`,
+        ugel: 'UGEL 07',
+        sede: payload?.sede || `Sede ${distritoAsignado} · ${hostName} (${hostIp})`,
+        schoolName: payload?.schoolName || `I.E. Sede ${distritoAsignado} (${hostName})`,
+        distrito: distritoAsignado,
+        tipoFalla: computedTipoFalla,
+        casoNumero: casoNumero,
+        casoNombre: casoNombre,
+        casoHistoriaJurado: casoHistoriaJurado,
         reporterUserId: 'usr-zabbix-webhook',
         reporterName: `Agente Zabbix (${hostName})`,
         reporterRole: 'Telemetría Proactiva de Red',
         reporterEmail: 'telemetria@ugel07.gob.pe',
         classroomLab: `Estación Virtual: ${hostName} · IP ${hostIp}`,
-        createdAt: formattedDate,
-        slaTargetHours: priority === 'urgent' ? 2 : priority === 'high' ? 8 : 24,
+        createdAt: timeSync.formattedDate,
+        horaIncidenciaVM: timeSync.timeOnly,
+        vmTimestamp: timeSync.vmTimestamp,
+        zonaHorariaVM: 'GMT-5 (UTC-5 Perú / VMware)',
+        slaTargetHours: computedPriority === 'urgent' ? 2 : computedPriority === 'high' ? 8 : 24,
         telemetriaZabbix: {
           lastGaspReceived: false,
           heartbeatConsecutiveFails: 3,
-          correlationConfidence: 96,
+          correlationConfidence: 98,
           ipDispositivo: hostIp,
           puertoAfectado: hostName.toLowerCase().includes('switch') ? 'GigabitEthernet0/2 (Trunk)' : 'eth0 / ens33 (10050)',
           latenciaMs: hostName.toLowerCase().includes('cpu') ? 14 : 0,
-          perdidaPaquetesPct: hostName.toLowerCase().includes('unreachable') ? 100 : 0,
+          perdidaPaquetesPct: hostName.toLowerCase().includes('unreachable') || casoNumero === 1 ? 100 : 0,
           anchoBandaUtilizadoMbps: 12.5,
-          ultimoSondeoSnmp: 'Hace 2 seg',
-          probableCausa: hostName.toLowerCase().includes('switch')
+          ultimoSondeoSnmp: 'Hace 1 seg',
+          probableCausa: casoNumero === 1
+            ? 'CORTE_FIBRA_OPTICA_TRONCAL'
+            : hostName.toLowerCase().includes('switch')
             ? 'CORTE_ENLACE_TRUNK_SWITCH'
             : 'FALLA_LOCAL_AISLADA',
         },
@@ -262,8 +403,8 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
             id: `c-zbx-${Date.now()}`,
             author: 'Zabbix Webhook Controller (Ubuntu / VMware)',
             role: 'Automatización de Incidencias',
-            text: `Evento procesado automáticamente desde Zabbix Server 7.0 LTS. Host: ${hostName} [${hostIp}]. Evento: ${eventName}. Métrica: ${itemValue}. Severidad: ${severity}.`,
-            timestamp: 'Hace instantes',
+            text: `Evento procesado desde Zabbix Server 7.0 LTS en VMware. Host: ${hostName} [${hostIp}]. Evento: ${eventName}. Métrica: ${itemValue}. Severidad: ${severity}. Hora VMware: ${timeSync.timeOnly}. ${casoNombre ? `[${casoNombre}]` : ''}`,
+            timestamp: timeSync.timeOnly,
           },
         ],
       };
@@ -278,7 +419,7 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
       // Record in live logs
       const logEntry: WebhookLogEntry = {
         id: `log-${Date.now()}`,
-        timestamp: formattedDate,
+        timestamp: timeSync.formattedDate,
         method: req.method,
         path: req.path,
         ip: req.ip || req.socket.remoteAddress || '192.168.40.10',

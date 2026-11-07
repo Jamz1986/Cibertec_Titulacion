@@ -21,6 +21,7 @@ import {
   Activity,
   WifiOff,
   PhoneCall,
+  GraduationCap,
 } from 'lucide-react';
 
 import { useAuth } from '../context/AuthContext';
@@ -257,9 +258,12 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
               <PhoneCall className="w-3.5 h-3.5" />
               <span>Llamada de Contingencia</span>
             </button>
-            <div className="flex items-center gap-1 text-slate-500 text-[11px]">
-              <Clock className="w-3.5 h-3.5" />
-              <span>Registrado: {ticket.createdAt}</span>
+            <div className="flex flex-col items-end text-right">
+              <div className="flex items-center gap-1 text-slate-700 dark:text-slate-200 font-bold text-xs bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
+                <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                <span>Hora VM: {ticket.horaIncidenciaVM || ticket.vmTimestamp || ticket.createdAt}</span>
+              </div>
+              <span className="text-[10px] text-slate-400 font-medium">America/Lima (UTC-5 · VMware)</span>
             </div>
           </div>
         </div>
@@ -342,6 +346,41 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
         {/* Tab 1: Info */}
         {activeTab === 'info' && (
           <div className="p-6 space-y-6 max-h-[65vh] overflow-y-auto">
+            {/* Escenario de Demostración para el Jurado de Titulación */}
+            {ticket.casoNumero && (
+              <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 dark:from-indigo-950/40 dark:via-purple-950/30 dark:to-indigo-950/40 border-2 border-indigo-300 dark:border-indigo-800 space-y-2.5 shadow-xs">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-indigo-600 text-white shadow-xs tracking-wide">
+                    <GraduationCap className="w-4 h-4" />
+                    <span>★ Caso {ticket.casoNumero}: {ticket.casoNombre?.replace(/Caso \d: /, '') || 'Escenario de Titulación'}</span>
+                  </span>
+                  <div className="flex items-center gap-1.5 text-[11px] font-mono font-bold text-indigo-700 dark:text-indigo-300 bg-white dark:bg-slate-900 px-2.5 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800">
+                    <Clock className="w-3.5 h-3.5 text-indigo-500" />
+                    <span>Hora VM: {ticket.horaIncidenciaVM || ticket.vmTimestamp || ticket.createdAt} (GMT-5)</span>
+                  </div>
+                </div>
+
+                {ticket.casoHistoriaJurado && (
+                  <div className="bg-white/80 dark:bg-slate-900/80 p-3 rounded-xl border border-indigo-200/80 dark:border-indigo-800/80 text-xs">
+                    <strong className="text-indigo-950 dark:text-indigo-200 block mb-0.5">
+                      🎓 Historia para el Jurado de Tesis:
+                    </strong>
+                    <p className="text-slate-700 dark:text-slate-300 italic leading-relaxed">
+                      &ldquo;{ticket.casoHistoriaJurado}&rdquo;
+                    </p>
+                  </div>
+                )}
+
+                <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-600 dark:text-slate-400 font-mono">
+                  <span><strong>Zona Horaria:</strong> GMT-5 (UTC-5 Perú · VMware)</span>
+                  <span>·</span>
+                  <span><strong>Tipo Falla:</strong> {ticket.tipoFalla || 'Hardware Aula / AIP'}</span>
+                  <span>·</span>
+                  <span><strong>Dispositivo:</strong> {ticket.classroomLab}</span>
+                </div>
+              </div>
+            )}
+
             {/* Description */}
             <div className="space-y-2">
               <span className="text-xs font-bold text-slate-900 dark:text-white uppercase tracking-wider block">
@@ -361,6 +400,18 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                 <div className="space-y-1 text-slate-600 dark:text-slate-400">
                   <p>
                     <strong className="text-slate-800 dark:text-slate-200">Colegio:</strong> {ticket.schoolName}
+                  </p>
+                  <p>
+                    <strong className="text-slate-800 dark:text-slate-200">Distrito UGEL 07:</strong>{' '}
+                    <span className="font-semibold text-indigo-600 dark:text-indigo-400">
+                      {ticket.distrito || 'Miraflores'}
+                    </span>
+                  </p>
+                  <p>
+                    <strong className="text-slate-800 dark:text-slate-200">Tipo de Avería:</strong>{' '}
+                    <span className="font-semibold text-slate-900 dark:text-white">
+                      {ticket.tipoFalla || 'Hardware Aula / AIP'}
+                    </span>
                   </p>
                   <p>
                     <strong className="text-slate-800 dark:text-slate-200">UGEL:</strong> {ticket.ugel}
