@@ -226,6 +226,8 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
       let computedTipoFalla: 'Red y Conectividad' | 'Hardware Aula / AIP' | 'Servidor y Servicios' | 'Suministro Eléctrico' | 'Software Educativo' = 'Hardware Aula / AIP';
 
       if (
+        normEvent.includes('link down') ||
+        normEvent.includes('interface') ||
         normEvent.includes('not available') ||
         normEvent.includes('nodata') ||
         normEvent.includes('unreachable') ||
@@ -238,8 +240,10 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         casoNumero = 1;
         casoNombre = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
         casoHistoriaJurado = 'Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio.';
-        computedTitle = `[Caso 1: Desconexión Física de Red] Windows: Zabbix agent is not available (or nodata for 30s) · ${hostName}`;
-        computedDesc = `Incidencia de Disponibilidad de Red: Pérdida total de enlace en ${hostName} (${hostIp}). Historia para el jurado: Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio. Alerta en Zabbix: Windows: Zabbix agent is not available (or nodata for 30s). Métrica: ${itemValue}. Severidad: Crítica.`;
+        computedTitle = normEvent.includes('link down')
+          ? `Desconexión de Enlace de Red (Ethernet Link Down) · ${hostName}`
+          : `Desconexión Física de Cable de Red (Pérdida Total de Enlace) · ${hostName}`;
+        computedDesc = `Incidencia de Disponibilidad de Red: Pérdida total de enlace en ${hostName} (${hostIp}). Historia para el jurado: Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio. Detección automática en puerto de red. Métrica: ${itemValue}. Severidad: Crítica.`;
         computedPriority = 'urgent';
         computedTipoFalla = 'Red y Conectividad';
       } else if (
@@ -253,12 +257,13 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         casoNumero = 2;
         casoNombre = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
         casoHistoriaJurado = 'Un alumno ejecuta un proceso en bucle infinito o software no autorizado que bloquea el procesador del equipo.';
-        computedTitle = `[Caso 2: Sobrecarga de Procesador] High CPU utilization (>95%) · ${hostName}`;
+        computedTitle = `Sobrecarga Crítica de Procesador CPU (>95%) · ${hostName}`;
         computedDesc = `Alerta Preventiva de Rendimiento: Saturación crítica de CPU en ${hostName} (${hostIp}). Métrica: ${itemValue || '98.4%'}. Historia para el jurado: Un alumno ejecuta un proceso en bucle infinito o software no autorizado que bloquea el procesador del equipo. El monitoreo advierte la saturación de recursos antes de que el equipo se colapse.`;
         computedPriority = 'high';
         computedTipoFalla = 'Hardware Aula / AIP';
       } else if (
         normEvent.includes('service is not running') ||
+        normEvent.includes('active checks are not available') ||
         normEvent.includes('service') ||
         normEvent.includes('servicio') ||
         normEvent.includes('agent service')
@@ -267,14 +272,30 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         casoNumero = 3;
         casoNombre = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
         casoHistoriaJurado = 'Falla inesperada del servicio de monitoreo o intento de detener los procesos de control en la estación de trabajo.';
-        computedTitle = `[Caso 3: Interrupción de Servicio Crítico] Zabbix agent service is not running · ${hostName}`;
+        computedTitle = `Interrupción de Servicio Crítico del Agente de Monitoreo · ${hostName}`;
         computedDesc = `Alerta de Estado de Agente: Servicio de monitoreo detenido en ${hostName} (${hostIp}). Historia para el jurado: Falla inesperada del servicio de monitoreo o intento de detener los procesos de control en la estación de trabajo. Evidencia el tiempo de respuesta directo del Webhook y la activación del banner sonoro en vivo en la mesa de ayuda.`;
         computedPriority = 'high';
         computedTipoFalla = 'Servidor y Servicios';
+      } else if (normEvent.includes('restarted') || normEvent.includes('reinicio')) {
+        computedTitle = `Reinicio Inesperado de Estación de Trabajo · ${hostName}`;
+        computedDesc = `La estación de trabajo ${hostName} experimentó un reinicio o apagado no programado (Uptime < 10m). Host: ${hostName} (${hostIp}). Métrica: ${itemValue}. Severidad: ${severity}.`;
+        computedPriority = 'medium';
+        computedTipoFalla = 'Hardware Aula / AIP';
       } else {
-        // Alerta genérica con nombre del evento real
-        computedTitle = `Alerta Zabbix: ${eventName} · ${hostName}`;
-        computedDesc = `Alerta emitida por Zabbix Server 7.0 (Ubuntu): ${eventName}. Host: ${hostName} (${hostIp}). Métrica: ${itemValue}. Severidad: ${severity}.`;
+        // Alerta concisa sin Alerta Zabbix en el título
+        let clean = eventName
+          .replace(/\[Caso \d:[^\]]+\]/gi, '')
+          .replace(/Alerta Zabbix SNMP:\s*/gi, '')
+          .replace(/Alerta Zabbix:\s*/gi, '')
+          .replace(/Zabbix:\s*/gi, '')
+          .replace(/^Windows:\s*/gi, '')
+          .replace(/^Linux:\s*/gi, '')
+          .trim();
+        if (!clean || clean.toLowerCase().startsWith('falla en')) {
+          clean = 'Falla de Disponibilidad en Estación';
+        }
+        computedTitle = `${clean} · ${hostName}`;
+        computedDesc = `Incidencia técnica detectada en la estación ${hostName} (${hostIp}). Métrica: ${itemValue}. Severidad: ${severity}.`;
         computedPriority = mapZabbixSeverityToPriority(severity);
         computedTipoFalla = hostName.toLowerCase().includes('switch') || hostName.toLowerCase().includes('router')
           ? 'Red y Conectividad'
@@ -364,7 +385,7 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
           : computedTipoFalla === 'Servidor y Servicios'
           ? 'school_server'
           : 'aip_hardware',
-        ugel: 'UGEL 07',
+        ugel: 'Mesa de Ayuda',
         sede: payload?.sede || `Sede ${distritoAsignado} · ${hostName} (${hostIp})`,
         schoolName: payload?.schoolName || `I.E. Sede ${distritoAsignado} (${hostName})`,
         distrito: distritoAsignado,
@@ -373,9 +394,9 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         casoNombre: casoNombre,
         casoHistoriaJurado: casoHistoriaJurado,
         reporterUserId: 'usr-zabbix-webhook',
-        reporterName: `Agente Zabbix (${hostName})`,
+        reporterName: `Sensor de Monitoreo (${hostName})`,
         reporterRole: 'Telemetría Proactiva de Red',
-        reporterEmail: 'telemetria@ugel07.gob.pe',
+        reporterEmail: 'telemetria@edudesk.edu.pe',
         classroomLab: `Estación Virtual: ${hostName} · IP ${hostIp}`,
         createdAt: timeSync.formattedDate,
         horaIncidenciaVM: timeSync.timeOnly,
@@ -611,6 +632,89 @@ async function setupServer() {
     console.log(`Zabbix Webhook POST Endpoint: http://0.0.0.0:${PORT}/api/webhooks/zabbix`);
     console.log(`=======================================================`);
   });
+
+  // Background real-time synchronization from Vercel endpoint
+  async function syncFromVercel() {
+    try {
+      const res = await fetch('https://cibertec-titulacion.vercel.app/api/webhooks/zabbix');
+      if (res.ok) {
+        const data: any = await res.json();
+        if (Array.isArray(data.recentTickets) && data.recentTickets.length > 0) {
+          let cache = loadCachedTickets();
+          const knownIds = new Set(cache.map((t) => t.id));
+          let updated = false;
+          for (const vt of data.recentTickets) {
+            if (!knownIds.has(vt.id)) {
+              let realEvent = vt.title || '';
+              if (vt.comments && vt.comments[0]?.text) {
+                const m = vt.comments[0].text.match(/Evento:\s*([^.]+?)(?:\.|\s*Métrica:)/i);
+                if (m && m[1]) realEvent = m[1].trim();
+              }
+              const lower = realEvent.toLowerCase();
+              let cleanTitle = 'Falla Técnica en Estación';
+              let casoNum: 1 | 2 | 3 | undefined = undefined;
+              let casoNom: string | undefined = undefined;
+              let casoHist: string | undefined = undefined;
+              let tipo: 'Red y Conectividad' | 'Hardware Aula / AIP' | 'Servidor y Servicios' = 'Hardware Aula / AIP';
+
+              if (lower.includes('link down') || lower.includes('interface')) {
+                cleanTitle = 'Desconexión de Enlace de Red (Ethernet Link Down) · PC-ALUMNO-01';
+                casoNum = 1;
+                casoNom = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
+                casoHist = 'Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio.';
+                tipo = 'Red y Conectividad';
+              } else if (lower.includes('active checks') || lower.includes('not available')) {
+                cleanTitle = 'Pérdida de Conectividad con Agente de Monitoreo · PC-ALUMNO-01';
+                casoNum = 1;
+                casoNom = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
+                casoHist = 'Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio.';
+                tipo = 'Red y Conectividad';
+              } else if (lower.includes('cpu')) {
+                cleanTitle = 'Sobrecarga Crítica de Procesador CPU (>95%) · PC-ALUMNO-01';
+                casoNum = 2;
+                casoNom = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
+                casoHist = 'Un alumno ejecuta un proceso en bucle infinito o software no autorizado que bloquea el procesador del equipo.';
+                tipo = 'Hardware Aula / AIP';
+              } else if (lower.includes('service')) {
+                cleanTitle = 'Interrupción de Servicio Crítico del Agente de Monitoreo · PC-ALUMNO-01';
+                casoNum = 3;
+                casoNom = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
+                casoHist = 'Falla inesperada del servicio de monitoreo o intento de detener los procesos de control en la estación de trabajo.';
+                tipo = 'Servidor y Servicios';
+              } else if (lower.includes('restarted')) {
+                cleanTitle = 'Reinicio Inesperado de Estación de Trabajo · PC-ALUMNO-01';
+                tipo = 'Hardware Aula / AIP';
+              }
+
+              const normalizedTicket: StoredWebhookTicket = {
+                ...vt,
+                title: cleanTitle,
+                titulo: cleanTitle,
+                ugel: 'Mesa de Ayuda',
+                tipoFalla: tipo,
+                casoNumero: casoNum,
+                casoNombre: casoNom,
+                casoHistoriaJurado: casoHist,
+                reporterEmail: 'telemetria@edudesk.edu.pe',
+                horaIncidenciaVM: vt.horaIncidenciaVM || '10:00:00 (GMT-5)',
+                vmTimestamp: vt.vmTimestamp || `${vt.createdAt || '2026-11-07 10:00:00'} (GMT-5 / UTC-5)`,
+                zonaHorariaVM: 'GMT-5 (UTC-5 Perú / VMware)',
+              };
+              cache.unshift(normalizedTicket);
+              knownIds.add(vt.id);
+              updated = true;
+            }
+          }
+          if (updated) {
+            receivedTickets = cache.slice(0, 50);
+            persistCachedTickets(receivedTickets);
+          }
+        }
+      }
+    } catch {}
+  }
+  setInterval(syncFromVercel, 2000);
+  syncFromVercel();
 }
 
 setupServer();

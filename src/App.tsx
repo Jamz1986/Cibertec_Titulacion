@@ -53,6 +53,7 @@ import { PacketTracerTopology } from './components/PacketTracerTopology';
 import { ZabbixConnectionModal } from './components/ZabbixConnectionModal';
 import { FAQSection } from './components/FAQSection';
 import { DistrictFailureDashboard } from './components/DistrictFailureDashboard';
+import { cleanAndEnrichTicket } from './utils/ticketCleaner';
 
 export default function App() {
   const { currentUser, logout, hasRole } = useAuth();
@@ -96,16 +97,17 @@ export default function App() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const existingCodes = new Set(parsed.map((t: Ticket) => t.code || t.id));
+          const cleanedParsed = parsed.map((t: any) => cleanAndEnrichTicket(t));
+          const existingCodes = new Set(cleanedParsed.map((t: Ticket) => t.code || t.id));
           const missingDemos = INITIAL_TICKETS.filter((t) => t.casoNumero && !existingCodes.has(t.code) && !existingCodes.has(t.id));
           if (missingDemos.length > 0) {
-            return [...missingDemos, ...parsed];
+            return [...missingDemos.map(cleanAndEnrichTicket), ...cleanedParsed];
           }
-          return parsed;
+          return cleanedParsed;
         }
       }
     } catch {}
-    return INITIAL_TICKETS;
+    return INITIAL_TICKETS.map(cleanAndEnrichTicket);
   });
 
   React.useEffect(() => {
@@ -135,9 +137,10 @@ export default function App() {
   // Sincronización en tiempo real con el backend de Webhooks de Zabbix y Vercel
   React.useEffect(() => {
     const handleIncomingTicketsList = (incoming: Ticket[]) => {
+      const cleanedIncoming = incoming.map((t) => cleanAndEnrichTicket(t));
       setTickets((prev) => {
         const existingIds = new Set(prev.map((t) => t.id));
-        const newTickets = incoming.filter((t) => !existingIds.has(t.id));
+        const newTickets = cleanedIncoming.filter((t) => !existingIds.has(t.id));
         if (newTickets.length > 0) {
           setLatestZabbixAlert(newTickets[0]);
           playAlertChime();
@@ -196,7 +199,7 @@ export default function App() {
     };
 
     fetchRecentWebhookTickets();
-    const interval = setInterval(fetchRecentWebhookTickets, 2500);
+    const interval = setInterval(fetchRecentWebhookTickets, 1000);
     return () => clearInterval(interval);
   }, []);
 
@@ -284,21 +287,21 @@ export default function App() {
     const newAutoTicket: Ticket = {
       id: `t-auto-${Date.now()}`,
       code: `TK-${now.getFullYear()}-${Math.floor(1000 + Math.random() * 9000)}`,
-      title: 'Alerta de Red: Puerto Gi0/12 Switch Troncal DOWN (VLAN 30)',
-      titulo: 'Alerta de Red: Puerto Gi0/12 Switch Troncal DOWN (VLAN 30)',
+      title: 'Desconexión de Puerto Gi0/12 en Switch Troncal (VLAN 30)',
+      titulo: 'Desconexión de Puerto Gi0/12 en Switch Troncal (VLAN 30)',
       description: 'El sistema de supervisión de red detectó estado DOWN en la interfaz de red del Laboratorio AIP 2. Se interrumpieron 24 PCs clientes del aula.',
       descripcion: 'El sistema de supervisión de red detectó estado DOWN en la interfaz de red del Laboratorio AIP 2.',
       origen: 'AUTOMATICO',
       priority: 'high',
       status: 'open',
       category: 'networking_connectivity',
-      ugel: 'UGEL 07',
+      ugel: 'Mesa de Ayuda',
       sede: 'Sede Miraflores - Switch de Distribución',
       schoolName: 'I.E. Juana Alarco de Dammert (Miraflores)',
       reporterUserId: 'usr-4',
       reporterName: 'Sensor de Red Automatizado (VLAN 30)',
       reporterRole: 'Monitoreo Proactivo de Red',
-      reporterEmail: 'telemetria@ugel07.gob.pe',
+      reporterEmail: 'telemetria@edudesk.edu.pe',
       classroomLab: 'Laboratorio AIP 2 (Pabellón B)',
       createdAt: formattedDate,
       slaTargetHours: 8,
@@ -414,7 +417,7 @@ export default function App() {
             </div>
             <div>
               <span className="font-bold text-slate-900 text-sm block leading-none">EduDesk TI</span>
-              <span className="text-[10px] text-slate-500 font-medium">UGEL 07 · Mesa de Ayuda</span>
+              <span className="text-[10px] text-slate-500 font-medium">Mesa de Ayuda TI</span>
             </div>
           </div>
         </div>
@@ -453,7 +456,7 @@ export default function App() {
                   EduDesk TI
                 </h1>
                 <p className="text-[11px] font-semibold text-indigo-600 leading-tight">
-                  Mesa de Ayuda · UGEL 07
+                  Mesa de Ayuda TI
                 </p>
               </div>
             </div>
@@ -565,7 +568,7 @@ export default function App() {
           >
             <div className="flex items-center gap-2.5">
               <BarChart3 className="w-4 h-4 text-indigo-500" />
-              <span>Fallas por Distrito (UGEL 07)</span>
+              <span>Fallas por Distrito</span>
             </div>
             <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-100 text-indigo-700">
               7
@@ -586,23 +589,6 @@ export default function App() {
             <Sliders className="w-4 h-4 text-indigo-500" />
             <span>{isGeneralUser ? 'Guía de Prioridades SLA' : 'Matriz de Prioridades SLA'}</span>
           </button>
-
-          {!isGeneralUser && (
-            <button
-              onClick={() => {
-                setActiveSection('thesis');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
-                activeSection === 'thesis'
-                  ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              <CheckCircle2 className="w-4 h-4 text-indigo-500" />
-              <span>Métricas de Titulación</span>
-            </button>
-          )}
 
           <button
             onClick={() => {
@@ -655,7 +641,7 @@ export default function App() {
                 {currentUser?.nombre}
               </p>
               <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
-                {currentUser?.rol === 'ADMIN' ? 'Admin NOC' : 'Técnico TI'} · UGEL 07
+                {currentUser?.rol === 'ADMIN' ? 'Admin NOC' : 'Técnico TI'} · Mesa de Ayuda
               </p>
             </div>
           </div>
@@ -734,7 +720,7 @@ export default function App() {
                       </div>
                     )}
 
-                    {/* Sincronización Horaria y Distrito UGEL 07 */}
+                    {/* Sincronización Horaria y Distrito */}
                     <div className="grid grid-cols-2 gap-2 text-xs bg-amber-50/80 p-3 rounded-xl border border-amber-200">
                       <div>
                         <span className="text-[10px] uppercase font-bold text-amber-800 flex items-center gap-1">
@@ -751,7 +737,7 @@ export default function App() {
                       <div>
                         <span className="text-[10px] uppercase font-bold text-amber-800 flex items-center gap-1">
                           <MapPin className="w-3 h-3 text-amber-600" />
-                          <span>Distrito UGEL 07</span>
+                          <span>Distrito</span>
                         </span>
                         <span className="font-bold text-slate-900 block mt-0.5 text-xs">
                           {latestZabbixAlert.distrito || 'Miraflores'}
@@ -836,7 +822,7 @@ export default function App() {
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="px-2.5 py-0.5 rounded-full bg-red-600 text-white text-[11px] font-bold tracking-wide animate-pulse flex items-center gap-1">
                         <Radio className="w-3 h-3" />
-                        <span>ALERTA CRÍTICA · INTERRUPCIÓN GENERAL DE RED (UGEL 07)</span>
+                        <span>ALERTA CRÍTICA · INTERRUPCIÓN GENERAL DE RED</span>
                       </span>
                       <span className="font-mono text-xs text-red-300 font-bold">
                         {criticalBlackoutAlert.ticket.code}
@@ -987,7 +973,7 @@ export default function App() {
                 <div>
                   <div className="flex items-center gap-2">
                     <span className="text-xs font-bold uppercase tracking-wider text-indigo-700">
-                      Mesa de Ayuda · UGEL 07
+                      Mesa de Ayuda TI
                     </span>
                     <span className="text-xs text-slate-300">·</span>
                     <span className="text-xs font-medium text-emerald-600">SLA Automatizado Activo</span>
@@ -1168,10 +1154,6 @@ export default function App() {
                                 Manual
                               </span>
                             )}
-                            <span className="text-slate-300">·</span>
-                            <span className="text-xs font-semibold text-indigo-700">
-                              {ticket.ugel}
-                            </span>
                             {ticket.distrito && (
                               <>
                                 <span className="text-slate-300">·</span>
@@ -1279,7 +1261,7 @@ export default function App() {
                   </h1>
                 </div>
                 <p className="text-xs text-slate-500 mt-1 max-w-3xl">
-                  Componente interactivo diseñado para categorizar incidentes en 4 niveles (Low, Medium, High, Urgent) conforme a las directivas tecnológicas de la DRELM y tiempos máximos de intervención de mesa de ayuda en UGEL 07.
+                  Componente interactivo diseñado para categorizar incidentes en 4 niveles (Low, Medium, High, Urgent) conforme a las directivas tecnológicas de la DRELM y tiempos máximos de intervención de mesa de ayuda en instituciones educativas.
                 </p>
               </div>
 
@@ -1308,7 +1290,7 @@ export default function App() {
                 {/* Technical Breakdown of the selected Priority */}
                 <div className="mt-4 p-4 rounded-xl border border-slate-200 bg-slate-50 space-y-2 text-xs">
                   <span className="font-bold text-slate-900 block">
-                    Criterios Técnicos para Especialistas de Soporte UGEL 07:
+                    Criterios Técnicos para Especialistas de Soporte:
                   </span>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-slate-700">
                     <div>
@@ -1357,7 +1339,7 @@ export default function App() {
                         <th className="px-6 py-3">Nivel (Esp / Eng)</th>
                         <th className="px-6 py-3">SLA Resolución</th>
                         <th className="px-6 py-3">Alcance de Alumnos</th>
-                        <th className="px-6 py-3">Escenario Típico (UGEL 07)</th>
+                        <th className="px-6 py-3">Escenario Típico</th>
                         <th className="px-6 py-3">Canal de Escalamiento</th>
                       </tr>
                     </thead>
@@ -1381,14 +1363,14 @@ export default function App() {
                         <td className="px-6 py-3 font-mono font-semibold">&lt; 8 horas</td>
                         <td className="px-6 py-3">Aula completa (30+ alumnos)</td>
                         <td className="px-6 py-3">Falla de switch de distribución o sin conexión a internet en AIP.</td>
-                        <td className="px-6 py-3">Especialista TI UGEL 07 presencial</td>
+                        <td className="px-6 py-3">Especialista TI presencial</td>
                       </tr>
                       <tr className="hover:bg-slate-50">
                         <td className="px-6 py-3 font-bold text-rose-700">Urgente / Urgent</td>
                         <td className="px-6 py-3 font-mono font-semibold">&lt; 2 horas</td>
                         <td className="px-6 py-3">Colegio completo / Jornada censal</td>
                         <td className="px-6 py-3">Caída del enlace principal de fibra durante evaluaciones MINEDU.</td>
-                        <td className="px-6 py-3">Equipo de Guardia Rápida UGEL 07 / DRELM</td>
+                        <td className="px-6 py-3">Equipo de Guardia Rápida / Soporte</td>
                       </tr>
                     </tbody>
                   </table>
@@ -1406,7 +1388,7 @@ export default function App() {
             />
           )}
 
-          {/* Section: Dashboard Interactivo de Fallas por Distrito (UGEL 07) */}
+          {/* Section: Dashboard Interactivo de Fallas por Distrito */}
           {activeSection === 'distritos-report' && (
             <DistrictFailureDashboard
               tickets={tickets}
@@ -1429,7 +1411,7 @@ export default function App() {
         <footer className="mt-auto border-t border-slate-200 bg-white py-4 px-6 text-xs text-slate-500">
           <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-2">
             <div>
-              Help Desk TI Automatizado & Monitoreo Proactivo de Red · Jurisdicción UGEL 07 (Lima Sur)
+              Help Desk TI Automatizado & Monitoreo Proactivo de Red · Instituciones Educativas (Lima Sur)
             </div>
             <div className="flex items-center gap-2">
               <span>Proyecto de Titulación Profesional de Ingeniería</span>

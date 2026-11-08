@@ -51,7 +51,7 @@ CREATE TABLE IF NOT EXISTS instituciones_educativas (
     id_ie INT AUTO_INCREMENT PRIMARY KEY,
     codigo_modular VARCHAR(10) NOT NULL UNIQUE,
     nombre_ie VARCHAR(150) NOT NULL,
-    ugel ENUM('UGEL 01', 'UGEL 02', 'UGEL 03', 'UGEL 04', 'UGEL 05', 'UGEL 06', 'UGEL 07') NOT NULL,
+    ugel VARCHAR(50) DEFAULT 'Mesa de Ayuda',
     distrito VARCHAR(80) NOT NULL,
     total_aulas_aip INT DEFAULT 2,
     tipo_gestion ENUM('Pública', 'Convenio', 'Privada') DEFAULT 'Pública',
@@ -514,7 +514,7 @@ Test-SchoolVMCompatibility -VMName "MINEDU-Moodle-Proxy"`;
               <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-900 text-sm">
-                    CU-05: Auditoría y Reportería de Métricas de Titulación (MTTR y SLA)
+                    CU-05: Auditoría y Reportería de Rendimiento Técnico (MTTR y SLA)
                   </span>
                   <span className="font-mono text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
                     Actor: Administrador DRELM / Investigador

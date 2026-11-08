@@ -272,7 +272,7 @@ export const DistrictFailureDashboard: React.FC<DistrictFailureDashboardProps> =
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-500/20 border border-indigo-400/30 text-indigo-300 text-xs font-bold uppercase tracking-wider">
               <MapPin className="w-3.5 h-3.5 text-indigo-400" />
-              <span>UGEL 07 · Jurisdicción de Lima Sur</span>
+              <span>Mesa de Ayuda TI · Jurisdicción de Lima Sur</span>
             </div>
             <h1 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
               Dashboard Interactivo de Fallas por Distrito
@@ -310,7 +310,7 @@ export const DistrictFailureDashboard: React.FC<DistrictFailureDashboardProps> =
           <div className="flex items-center gap-2">
             <Filter className="w-4 h-4 text-indigo-600" />
             <span className="text-xs font-bold text-slate-800 uppercase tracking-wider">
-              Seleccionar Distrito de la UGEL 07:
+              Seleccionar Distrito:
             </span>
           </div>
           {selectedDistrict !== 'ALL' && (
@@ -457,7 +457,7 @@ export const DistrictFailureDashboard: React.FC<DistrictFailureDashboardProps> =
                   <BarChart3 className="w-5 h-5 text-indigo-600" />
                   <span>
                     Frecuencia de Averías{' '}
-                    {selectedDistrict === 'ALL' ? 'en UGEL 07' : `en ${selectedDistrict}`}
+                    {selectedDistrict === 'ALL' ? 'en todas las sedes' : `en ${selectedDistrict}`}
                   </span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
@@ -534,7 +534,7 @@ export const DistrictFailureDashboard: React.FC<DistrictFailureDashboardProps> =
             <div>
               <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
                 <Building2 className="w-5 h-5 text-indigo-600" />
-                <span>Comparativa Territorial de los 7 Distritos (UGEL 07)</span>
+                <span>Comparativa Territorial de los 7 Distritos</span>
               </h3>
               <p className="text-xs text-slate-500 mt-0.5">
                 Diagnóstico de la avería principal identificada en cada jurisdicción distrital
@@ -596,7 +596,7 @@ export const DistrictFailureDashboard: React.FC<DistrictFailureDashboardProps> =
           <div className="p-6 rounded-2xl bg-white border border-slate-200 shadow-xs space-y-4">
             <div className="flex items-center gap-2 text-slate-900 font-bold">
               <ShieldAlert className="w-5 h-5 text-amber-500" />
-              <h3 className="text-sm font-bold">Recomendaciones Operativas UGEL 07</h3>
+              <h3 className="text-sm font-bold">Recomendaciones Operativas de Red</h3>
             </div>
 
             <div className="space-y-3 text-xs leading-relaxed text-slate-600">

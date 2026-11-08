@@ -402,7 +402,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                     <strong className="text-slate-800 dark:text-slate-200">Colegio:</strong> {ticket.schoolName}
                   </p>
                   <p>
-                    <strong className="text-slate-800 dark:text-slate-200">Distrito UGEL 07:</strong>{' '}
+                    <strong className="text-slate-800 dark:text-slate-200">Distrito:</strong>{' '}
                     <span className="font-semibold text-indigo-600 dark:text-indigo-400">
                       {ticket.distrito || 'Miraflores'}
                     </span>
@@ -414,7 +414,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                     </span>
                   </p>
                   <p>
-                    <strong className="text-slate-800 dark:text-slate-200">UGEL:</strong> {ticket.ugel}
+                    <strong className="text-slate-800 dark:text-slate-200">Jurisdicción:</strong> Lima Sur (Mesa de Ayuda TI)
                   </p>
                   <p>
                     <strong className="text-slate-800 dark:text-slate-200">Ambiente:</strong> {ticket.classroomLab}

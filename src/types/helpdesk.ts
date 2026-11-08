@@ -10,15 +10,17 @@ export type TicketCategory =
   | 'educational_software';
 
 export type UGELCode =
+  | 'Mesa de Ayuda'
+  | 'Red Educativa'
   | 'UGEL 01'
   | 'UGEL 02'
   | 'UGEL 03'
   | 'UGEL 04'
   | 'UGEL 05'
   | 'UGEL 06'
-  | 'UGEL 07';
+  | string;
 
-export type UGEL07District =
+export type EducationalDistrict =
   | 'Miraflores'
   | 'San Borja'
   | 'Santiago de Surco'
@@ -26,6 +28,8 @@ export type UGEL07District =
   | 'Barranco'
   | 'Chorrillos'
   | 'Surquillo';
+
+export type UGEL07District = EducationalDistrict;
 
 export type FailureType =
   | 'Red y Conectividad'
@@ -159,7 +163,7 @@ export interface Ticket {
   sinistroZonal?: boolean;
   outageCause?: OutageCause;
   telemetriaZabbix?: ZabbixTelemetry;
-  // Campos de Sincronización y Dashboard UGEL 07
+  // Campos de Sincronización y Dashboard Distrital
   distrito?: UGEL07District;
   tipoFalla?: FailureType;
   vmTimestamp?: string; // e.g. "2026-11-02 09:58:21 (GMT-5 / UTC-5)"

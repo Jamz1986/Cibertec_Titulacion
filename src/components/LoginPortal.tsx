@@ -61,14 +61,14 @@ export const LoginPortal: React.FC = () => {
               Mesa de Ayuda TI & Monitoreo Proactivo
             </span>
             <span className="hidden sm:inline text-xs text-slate-500 ml-2">
-              · Jurisdicción UGEL 07 (Lima Sur)
+              · Instituciones Educativas (Lima Sur)
             </span>
           </div>
         </div>
 
         <div className="flex items-center gap-2 bg-emerald-950/60 border border-emerald-800/60 px-3 py-1 rounded-full text-[11px] text-emerald-400 font-mono">
           <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-          <span>PORTAL EN LÍNEA · UGEL 07</span>
+          <span>PORTAL EN LÍNEA · MESA DE AYUDA</span>
         </div>
       </header>
 
@@ -89,7 +89,7 @@ export const LoginPortal: React.FC = () => {
               </h1>
               
               <p className="text-sm md:text-base text-slate-400 leading-relaxed">
-                Sistema institucional para las Instituciones Educativas de la <strong>UGEL 07</strong> (San Borja, Miraflores, Santiago de Surco, Barranco, Chorrillos, Surquillo y San Luis).
+                Sistema institucional para las Instituciones Educativas de la <strong>Red Escolar</strong> (San Borja, Miraflores, Santiago de Surco, Barranco, Chorrillos, Surquillo y San Luis).
                 Optimiza la supervisión continua de la conectividad en Aulas de Innovación Pedagógica (AIP), la atención oportuna de incidencias técnicas y el cumplimiento riguroso de tiempos de respuesta según criticidad.
               </p>
             </div>

@@ -34,9 +34,9 @@ export const TicketSubmissionModal: React.FC<TicketSubmissionModalProps> = ({
   const [title, setTitle] = useState('');
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState<TicketCategory>('networking_connectivity');
-  const [ugel, setUgel] = useState<UGELCode>('UGEL 07');
+  const [ugel, setUgel] = useState<UGELCode>('Mesa de Ayuda');
   const [schoolName, setSchoolName] = useState(
-    UGEL_SCHOOLS['UGEL 07'][0]
+    UGEL_SCHOOLS['Mesa de Ayuda'] ? UGEL_SCHOOLS['Mesa de Ayuda'][0] : 'I.E. Juana Alarco de Dammert'
   );
   const [customSchool, setCustomSchool] = useState('');
   const [reporterName, setReporterName] = useState(
@@ -250,10 +250,10 @@ export const TicketSubmissionModal: React.FC<TicketSubmissionModalProps> = ({
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
               <div>
                 <label className="block text-slate-600 dark:text-slate-400 font-medium mb-1">
-                  Jurisdicción UGEL
+                  Jurisdicción Territorial
                 </label>
                 <div className="w-full px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-slate-100 dark:bg-slate-800 text-slate-800 dark:text-slate-200 font-bold flex items-center justify-between">
-                  <span>UGEL 07</span>
+                  <span>Mesa de Ayuda TI</span>
                   <span className="text-[10px] text-slate-500 font-normal">Lima Sur</span>
                 </div>
               </div>

@@ -43,7 +43,7 @@ const INITIAL_NODES: SchoolNodeStatus[] = [
   {
     id: 'node-1',
     name: 'I.E. Juana Alarco de Dammert',
-    ugel: 'UGEL 07',
+    ugel: 'Mesa de Ayuda',
     ip: '10.107.12.1',
     status: 'ONLINE',
     pingMs: 12,
@@ -55,7 +55,7 @@ const INITIAL_NODES: SchoolNodeStatus[] = [
   {
     id: 'node-2',
     name: 'I.E. Scipión E. Llona',
-    ugel: 'UGEL 07',
+    ugel: 'Mesa de Ayuda',
     ip: '10.107.18.1',
     status: 'ONLINE',
     pingMs: 14,
@@ -67,7 +67,7 @@ const INITIAL_NODES: SchoolNodeStatus[] = [
   {
     id: 'node-3',
     name: 'I.E. Romeo Luna Victoria',
-    ugel: 'UGEL 07',
+    ugel: 'Mesa de Ayuda',
     ip: '10.107.22.1',
     status: 'ONLINE',
     pingMs: 11,
@@ -79,7 +79,7 @@ const INITIAL_NODES: SchoolNodeStatus[] = [
   {
     id: 'node-4',
     name: 'I.E. Los Educadores',
-    ugel: 'UGEL 07',
+    ugel: 'Mesa de Ayuda',
     ip: '10.107.8.1',
     status: 'ONLINE',
     pingMs: 13,
@@ -91,7 +91,7 @@ const INITIAL_NODES: SchoolNodeStatus[] = [
   {
     id: 'node-5',
     name: 'I.E. José María Eguren',
-    ugel: 'UGEL 07',
+    ugel: 'Mesa de Ayuda',
     ip: '10.107.14.1',
     status: 'ONLINE',
     pingMs: 15,
@@ -103,7 +103,7 @@ const INITIAL_NODES: SchoolNodeStatus[] = [
   {
     id: 'node-6',
     name: 'I.E. Manuel Polo Jiménez',
-    ugel: 'UGEL 07',
+    ugel: 'Mesa de Ayuda',
     ip: '10.107.4.1',
     status: 'ONLINE',
     pingMs: 16,
@@ -125,7 +125,7 @@ export const ZonalBlackoutMonitor: React.FC<ZonalBlackoutMonitorProps> = ({
   const [isSimulating, setIsSimulating] = useState(false);
   const [simStep, setSimStep] = useState(0);
   const [logs, setLogs] = useState<string[]>([
-    '[' + new Date().toLocaleTimeString() + '] [MONITOREO-INICIALIZADO] Polling activo hacia nodos core escolares en UGEL 07.',
+    '[' + new Date().toLocaleTimeString() + '] [MONITOREO-INICIALIZADO] Polling activo hacia nodos core de instituciones educativas.',
     '[' + new Date().toLocaleTimeString() + '] [HEARTBEAT-DAEMON] Verificación de enlace activa: timeout = 45s, reintentos = 3.',
     '[' + new Date().toLocaleTimeString() + '] [REGLA-CORRELACION] Umbral zonal: >= 2 caídas en misma sede en ventana < 180s activa clasificación de CONTINGENCIA MASIVA.',
   ]);
