@@ -169,8 +169,7 @@ export interface Ticket {
   vmTimestamp?: string; // e.g. "2026-11-02 09:58:21 (GMT-5 / UTC-5)"
   horaIncidenciaVM?: string; // e.g. "09:58:21 (GMT-5)"
   zonaHorariaVM?: string; // e.g. "GMT-5 (UTC-5 Perú / VMware)"
-  // Escenarios de Titulación para el Jurado
+  // Escenarios de Demostración
   casoNumero?: 1 | 2 | 3;
   casoNombre?: string;
-  casoHistoriaJurado?: string;
 }

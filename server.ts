@@ -69,7 +69,6 @@ interface StoredWebhookTicket {
   zonaHorariaVM?: string;
   casoNumero?: 1 | 2 | 3;
   casoNombre?: string;
-  casoHistoriaJurado?: string;
   telemetriaZabbix?: {
     lastGaspReceived: boolean;
     heartbeatConsecutiveFails: number;
@@ -219,7 +218,6 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
 
       let casoNumero: 1 | 2 | 3 | undefined = undefined;
       let casoNombre: string | undefined = undefined;
-      let casoHistoriaJurado: string | undefined = undefined;
       let computedTitle = '';
       let computedDesc = '';
       let computedPriority: 'urgent' | 'high' | 'medium' | 'low' = mapZabbixSeverityToPriority(severity);
@@ -239,11 +237,10 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         // Caso 1: Desconexión Física de Red (Disponibilidad / Red)
         casoNumero = 1;
         casoNombre = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
-        casoHistoriaJurado = 'Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio.';
         computedTitle = normEvent.includes('link down')
           ? `Desconexión de Enlace de Red (Ethernet Link Down) · ${hostName}`
           : `Desconexión Física de Cable de Red (Pérdida Total de Enlace) · ${hostName}`;
-        computedDesc = `Incidencia de Disponibilidad de Red: Pérdida total de enlace en ${hostName} (${hostIp}). Historia para el jurado: Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio. Detección automática en puerto de red. Métrica: ${itemValue}. Severidad: Crítica.`;
+        computedDesc = `Incidencia de Disponibilidad de Red: Pérdida total de enlace en ${hostName} (${hostIp}) por desconexión física del puerto de red. Métrica: ${itemValue}. Severidad: Crítica.`;
         computedPriority = 'urgent';
         computedTipoFalla = 'Red y Conectividad';
       } else if (
@@ -256,9 +253,8 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         // Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)
         casoNumero = 2;
         casoNombre = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
-        casoHistoriaJurado = 'Un alumno ejecuta un proceso en bucle infinito o software no autorizado que bloquea el procesador del equipo.';
         computedTitle = `Sobrecarga Crítica de Procesador CPU (>95%) · ${hostName}`;
-        computedDesc = `Alerta Preventiva de Rendimiento: Saturación crítica de CPU en ${hostName} (${hostIp}). Métrica: ${itemValue || '98.4%'}. Historia para el jurado: Un alumno ejecuta un proceso en bucle infinito o software no autorizado que bloquea el procesador del equipo. El monitoreo advierte la saturación de recursos antes de que el equipo se colapse.`;
+        computedDesc = `Alerta Preventiva de Rendimiento: Saturación crítica de CPU en ${hostName} (${hostIp}). Métrica: ${itemValue || '98.4%'}. El monitoreo advierte la saturación de recursos antes de que el equipo se colapse.`;
         computedPriority = 'high';
         computedTipoFalla = 'Hardware Aula / AIP';
       } else if (
@@ -271,9 +267,8 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         // Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)
         casoNumero = 3;
         casoNombre = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
-        casoHistoriaJurado = 'Falla inesperada del servicio de monitoreo o intento de detener los procesos de control en la estación de trabajo.';
         computedTitle = `Interrupción de Servicio Crítico del Agente de Monitoreo · ${hostName}`;
-        computedDesc = `Alerta de Estado de Agente: Servicio de monitoreo detenido en ${hostName} (${hostIp}). Historia para el jurado: Falla inesperada del servicio de monitoreo o intento de detener los procesos de control en la estación de trabajo. Evidencia el tiempo de respuesta directo del Webhook y la activación del banner sonoro en vivo en la mesa de ayuda.`;
+        computedDesc = `Alerta de Estado de Agente: Servicio de monitoreo detenido en ${hostName} (${hostIp}) por falla inesperada del servicio o detención de procesos de control.`;
         computedPriority = 'high';
         computedTipoFalla = 'Servidor y Servicios';
       } else if (normEvent.includes('restarted') || normEvent.includes('reinicio')) {
@@ -392,7 +387,6 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         tipoFalla: computedTipoFalla,
         casoNumero: casoNumero,
         casoNombre: casoNombre,
-        casoHistoriaJurado: casoHistoriaJurado,
         reporterUserId: 'usr-zabbix-webhook',
         reporterName: `Sensor de Monitoreo (${hostName})`,
         reporterRole: 'Telemetría Proactiva de Red',
@@ -519,6 +513,84 @@ app.get('/api/tickets/recent', (_req, res) => {
     count: allTickets.length,
     tickets: allTickets,
   });
+});
+
+// Power BI Flat JSON Dataset Endpoint (Web.Contents ready)
+app.get('/api/export/powerbi', (_req, res) => {
+  const allTickets = loadCachedTickets();
+  const rows = allTickets.map((t) => ({
+    Codigo_Ticket: t.code,
+    Fecha_Hora_GMT5: t.createdAt,
+    Hora_VM: t.horaIncidenciaVM || t.createdAt,
+    Distrito: t.distrito || 'Miraflores',
+    Institucion_Educativa: t.schoolName,
+    Ambiente_Laboratorio: t.classroomLab,
+    Tipo_Falla: t.tipoFalla || 'Hardware Aula / AIP',
+    Prioridad: t.priority,
+    Estado: t.status,
+    Origen: t.origen,
+    SLA_Objetivo_Horas: t.slaTargetHours,
+    Titulo_Problema: t.title,
+    Reportante: t.reporterName,
+    IP_Dispositivo: t.telemetriaZabbix?.ipDispositivo || '',
+    Latencia_ms: t.telemetriaZabbix?.latenciaMs ?? 0,
+    Perdida_Paquetes_Pct: t.telemetriaZabbix?.perdidaPaquetesPct ?? 0,
+  }));
+  res.header('Access-Control-Allow-Origin', '*');
+  res.json(rows);
+});
+
+// Power BI CSV Endpoint
+app.get('/api/export/powerbi.csv', (_req, res) => {
+  const allTickets = loadCachedTickets();
+  const headers = [
+    'Codigo_Ticket',
+    'Fecha_Hora_GMT5',
+    'Hora_VM',
+    'Distrito',
+    'Institucion_Educativa',
+    'Ambiente_Laboratorio',
+    'Tipo_Falla',
+    'Prioridad',
+    'Estado',
+    'Origen',
+    'SLA_Objetivo_Horas',
+    'Titulo_Problema',
+    'Reportante',
+    'IP_Dispositivo',
+    'Latencia_ms',
+    'Perdida_Paquetes_Pct',
+  ];
+  const esc = (v: unknown) => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const csvLines = [
+    headers.join(','),
+    ...allTickets.map((t) =>
+      [
+        t.code,
+        t.createdAt,
+        t.horaIncidenciaVM || t.createdAt,
+        t.distrito || 'Miraflores',
+        t.schoolName,
+        t.classroomLab,
+        t.tipoFalla || 'Hardware Aula / AIP',
+        t.priority,
+        t.status,
+        t.origen,
+        t.slaTargetHours,
+        t.title,
+        t.reporterName,
+        t.telemetriaZabbix?.ipDispositivo || '',
+        t.telemetriaZabbix?.latenciaMs ?? 0,
+        t.telemetriaZabbix?.perdidaPaquetesPct ?? 0,
+      ]
+        .map(esc)
+        .join(',')
+    ),
+  ];
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Content-Type', 'text/csv; charset=utf-8');
+  res.header('Content-Disposition', 'attachment; filename="EduDesk_Fallas_Distrito_PowerBI.csv"');
+  res.send('\uFEFF' + csvLines.join('\r\n'));
 });
 
 // Health check
@@ -654,32 +726,27 @@ async function setupServer() {
               let cleanTitle = 'Falla Técnica en Estación';
               let casoNum: 1 | 2 | 3 | undefined = undefined;
               let casoNom: string | undefined = undefined;
-              let casoHist: string | undefined = undefined;
               let tipo: 'Red y Conectividad' | 'Hardware Aula / AIP' | 'Servidor y Servicios' = 'Hardware Aula / AIP';
 
               if (lower.includes('link down') || lower.includes('interface')) {
                 cleanTitle = 'Desconexión de Enlace de Red (Ethernet Link Down) · PC-ALUMNO-01';
                 casoNum = 1;
                 casoNom = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
-                casoHist = 'Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio.';
                 tipo = 'Red y Conectividad';
               } else if (lower.includes('active checks') || lower.includes('not available')) {
                 cleanTitle = 'Pérdida de Conectividad con Agente de Monitoreo · PC-ALUMNO-01';
                 casoNum = 1;
                 casoNom = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
-                casoHist = 'Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio.';
                 tipo = 'Red y Conectividad';
               } else if (lower.includes('cpu')) {
                 cleanTitle = 'Sobrecarga Crítica de Procesador CPU (>95%) · PC-ALUMNO-01';
                 casoNum = 2;
                 casoNom = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
-                casoHist = 'Un alumno ejecuta un proceso en bucle infinito o software no autorizado que bloquea el procesador del equipo.';
                 tipo = 'Hardware Aula / AIP';
               } else if (lower.includes('service')) {
                 cleanTitle = 'Interrupción de Servicio Crítico del Agente de Monitoreo · PC-ALUMNO-01';
                 casoNum = 3;
                 casoNom = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
-                casoHist = 'Falla inesperada del servicio de monitoreo o intento de detener los procesos de control en la estación de trabajo.';
                 tipo = 'Servidor y Servicios';
               } else if (lower.includes('restarted')) {
                 cleanTitle = 'Reinicio Inesperado de Estación de Trabajo · PC-ALUMNO-01';
@@ -694,7 +761,6 @@ async function setupServer() {
                 tipoFalla: tipo,
                 casoNumero: casoNum,
                 casoNombre: casoNom,
-                casoHistoriaJurado: casoHist,
                 reporterEmail: 'telemetria@edudesk.edu.pe',
                 horaIncidenciaVM: vt.horaIncidenciaVM || '10:00:00 (GMT-5)',
                 vmTimestamp: vt.vmTimestamp || `${vt.createdAt || '2026-11-07 10:00:00'} (GMT-5 / UTC-5)`,

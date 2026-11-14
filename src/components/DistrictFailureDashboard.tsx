@@ -20,6 +20,12 @@ import {
   Building2,
   ChevronRight,
   ShieldAlert,
+  Download,
+  FileSpreadsheet,
+  FileJson,
+  Database,
+  HelpCircle,
+  Check,
 } from 'lucide-react';
 
 interface DistrictFailureDashboardProps {
@@ -91,6 +97,8 @@ export const DistrictFailureDashboard: React.FC<DistrictFailureDashboardProps> =
   const [selectedFailureType, setSelectedFailureType] = useState<FailureType | 'ALL'>('ALL');
   const [selectedPriority, setSelectedPriority] = useState<Priority | 'ALL'>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [exportFeedback, setExportFeedback] = useState<string | null>(null);
+  const [showPowerBIGuide, setShowPowerBIGuide] = useState(false);
 
   // Normalizar y enriquecer tickets si algún webhook no tenía distrito explícito
   const normalizedTickets = useMemo(() => {
@@ -263,6 +271,170 @@ export const DistrictFailureDashboard: React.FC<DistrictFailureDashboardProps> =
     percentage: 0,
   };
 
+  // =========================================================================
+  // Exportación compatible con Microsoft Power BI Desktop
+  // =========================================================================
+  const triggerDownload = (content: string, filename: string, mimeType: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const notifyExport = (msg: string) => {
+    setExportFeedback(msg);
+    setTimeout(() => setExportFeedback(null), 4000);
+  };
+
+  const buildPowerBIRecords = (sourceTickets: typeof filteredTickets) => {
+    const priorityLabels: Record<Priority, { label: string; order: number }> = {
+      urgent: { label: 'Urgente', order: 1 },
+      high: { label: 'Alta', order: 2 },
+      medium: { label: 'Media', order: 3 },
+      low: { label: 'Baja', order: 4 },
+    };
+    const statusLabels: Record<string, string> = {
+      open: 'Abierto',
+      vmware_testing: 'En Validación VMware',
+      in_progress: 'En Progreso',
+      resolved: 'Resuelto',
+      closed: 'Cerrado',
+    };
+
+    return sourceTickets.map((t) => {
+      const fechaHora = t.vmTimestamp || t.createdAt || '';
+      const fechaMatch = fechaHora.match(/\d{4}-\d{2}-\d{2}/);
+      const horaMatch = (t.horaIncidenciaVM || fechaHora).match(/\d{2}:\d{2}(:\d{2})?/);
+      const pInfo = priorityLabels[t.priority] || { label: t.priority, order: 3 };
+      const distritoVal = t.distrito || 'Miraflores';
+
+      return {
+        Codigo_Ticket: t.code,
+        Fecha_Hora_GMT5: fechaHora.replace(/\s*\(GMT-5.*\)/i, '').trim(),
+        Fecha: fechaMatch ? fechaMatch[0] : '2026-11-14',
+        Hora_GMT5: horaMatch ? horaMatch[0] : '00:00:00',
+        Distrito: distritoVal,
+        Ubicacion_Mapa: `${distritoVal}, Lima, Perú`,
+        Institucion_Educativa: t.schoolName,
+        Ambiente_Laboratorio: t.classroomLab,
+        Tipo_Falla: t.tipoFalla || 'Hardware Aula / AIP',
+        Categoria: t.category,
+        Prioridad: pInfo.label,
+        Prioridad_Orden: pInfo.order,
+        Estado: statusLabels[t.status] || t.status,
+        Origen: t.origen,
+        SLA_Objetivo_Horas: t.slaTargetHours,
+        Titulo_Problema: t.title,
+        Descripcion: t.description,
+        Reportante: t.reporterName,
+        IP_Dispositivo: t.telemetriaZabbix?.ipDispositivo || '',
+        Latencia_ms: t.telemetriaZabbix?.latenciaMs ?? 0,
+        Perdida_Paquetes_Pct: t.telemetriaZabbix?.perdidaPaquetesPct ?? 0,
+      };
+    });
+  };
+
+  const escapeCsvCell = (val: unknown) => `"${String(val ?? '').replace(/"/g, '""')}"`;
+
+  const handleExportPowerBICSV = () => {
+    const records = buildPowerBIRecords(filteredTickets);
+    if (records.length === 0) return;
+    const headers = Object.keys(records[0]);
+    const csvRows = [
+      headers.join(','),
+      ...records.map((row) =>
+        headers.map((h) => escapeCsvCell((row as Record<string, unknown>)[h])).join(',')
+      ),
+    ];
+    const stamp = new Date().toISOString().slice(0, 10);
+    triggerDownload('\uFEFF' + csvRows.join('\r\n'), `EduDesk_Fallas_Distrito_PowerBI_${stamp}.csv`, 'text/csv;charset=utf-8;');
+    notifyExport(`CSV exportado (${records.length} registros) listo para Power BI`);
+  };
+
+  const handleExportDistrictSummaryCSV = () => {
+    const headers = [
+      'Distrito',
+      'Ubicacion_Mapa',
+      'Total_Tickets',
+      'Red_y_Conectividad',
+      'Hardware_Aula_AIP',
+      'Servidor_y_Servicios',
+      'Suministro_Electrico',
+      'Software_Educativo',
+      'Casos_Urgentes',
+      'Casos_Altos',
+      'Falla_Predominante',
+      'Incidencias_Falla_Principal',
+    ];
+    const rows = UGEL07_DISTRICTS.map((dist) => {
+      const s = districtStats[dist];
+      return [
+        dist,
+        `${dist}, Lima, Perú`,
+        s.total,
+        s.byFailure['Red y Conectividad'],
+        s.byFailure['Hardware Aula / AIP'],
+        s.byFailure['Servidor y Servicios'],
+        s.byFailure['Suministro Eléctrico'],
+        s.byFailure['Software Educativo'],
+        s.urgentCount,
+        s.highCount,
+        s.topFailure,
+        s.topFailureCount,
+      ]
+        .map(escapeCsvCell)
+        .join(',');
+    });
+    const stamp = new Date().toISOString().slice(0, 10);
+    triggerDownload(
+      '\uFEFF' + [headers.join(','), ...rows].join('\r\n'),
+      `EduDesk_Matriz_Distritos_PowerBI_${stamp}.csv`,
+      'text/csv;charset=utf-8;'
+    );
+    notifyExport('Matriz resumen de los 7 distritos exportada (CSV)');
+  };
+
+  const handleExportPowerBIJSON = () => {
+    const records = buildPowerBIRecords(filteredTickets);
+    const stamp = new Date().toISOString().slice(0, 10);
+    triggerDownload(
+      JSON.stringify(records, null, 2),
+      `EduDesk_Fallas_Distrito_PowerBI_${stamp}.json`,
+      'application/json;charset=utf-8;'
+    );
+    notifyExport(`JSON plano exportado (${records.length} registros) para Power BI`);
+  };
+
+  const handleExportPBIDS = () => {
+    const endpointUrl = `${window.location.origin}/api/export/powerbi`;
+    const pbidsPayload = {
+      version: '0.1',
+      connections: [
+        {
+          details: {
+            protocol: 'http',
+            address: {
+              url: endpointUrl,
+            },
+          },
+          authentication: null,
+          mode: null,
+        },
+      ],
+    };
+    triggerDownload(
+      JSON.stringify(pbidsPayload, null, 2),
+      'EduDesk_Fallas_Distrito.pbids',
+      'application/json;charset=utf-8;'
+    );
+    notifyExport('Archivo .PBIDS generado para abrir directamente en Power BI Desktop');
+  };
+
   return (
     <div className="space-y-6">
       {/* Header Banner */}
@@ -302,6 +474,106 @@ export const DistrictFailureDashboard: React.FC<DistrictFailureDashboardProps> =
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Power BI Export Toolbar */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs space-y-3">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 border border-amber-200 text-amber-700 flex items-center justify-center shrink-0">
+              <Database className="w-5 h-5" />
+            </div>
+            <div>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-bold text-slate-900">
+                  Exportar Dataset para Microsoft Power BI
+                </h2>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200">
+                  Power BI Ready
+                </span>
+              </div>
+              <p className="text-xs text-slate-500">
+                Descargue los datos estructurados ({filteredTickets.length} registros) con geocodificación distrital y marca horaria GMT-5 para abrir en Power BI Desktop.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={handleExportPowerBICSV}
+              className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-600 text-slate-950 font-bold text-xs shadow-xs transition-colors cursor-pointer"
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              <span>Exportar CSV (Power BI)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportDistrictSummaryCSV}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-semibold text-xs transition-colors cursor-pointer"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>Matriz Distritos (CSV)</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportPowerBIJSON}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-semibold text-xs transition-colors cursor-pointer"
+            >
+              <FileJson className="w-3.5 h-3.5" />
+              <span>JSON Plano</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={handleExportPBIDS}
+              className="inline-flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold text-xs transition-colors cursor-pointer"
+              title="Genera el conector directo .pbids para abrir en Power BI Desktop"
+            >
+              <ArrowUpRight className="w-3.5 h-3.5" />
+              <span>Conector .PBIDS</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setShowPowerBIGuide(!showPowerBIGuide)}
+              className="inline-flex items-center gap-1 px-2.5 py-2 rounded-xl text-xs font-semibold text-slate-600 hover:text-slate-900 hover:bg-slate-100 transition-colors cursor-pointer"
+              title="Ver pasos para abrir en Power BI Desktop"
+            >
+              <HelpCircle className="w-4 h-4" />
+              <span className="hidden sm:inline">¿Cómo abrir?</span>
+            </button>
+          </div>
+        </div>
+
+        {exportFeedback && (
+          <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-semibold">
+            <Check className="w-4 h-4 text-emerald-600 shrink-0" />
+            <span>{exportFeedback}</span>
+          </div>
+        )}
+
+        {showPowerBIGuide && (
+          <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 text-xs text-slate-700 space-y-1.5">
+            <p className="font-bold text-slate-900">Pasos para abrir el reporte en Power BI Desktop:</p>
+            <ol className="list-decimal list-inside space-y-1 text-slate-600">
+              <li>
+                Haga clic en <strong>Exportar CSV (Power BI)</strong> para descargar el detalle de incidentes o en <strong>Matriz Distritos (CSV)</strong> para la tabla comparativa de los 7 distritos.
+              </li>
+              <li>
+                Abra <strong>Power BI Desktop</strong> → <strong>Inicio</strong> → <strong>Obtener datos</strong> → <strong>Texto o CSV</strong> (o <strong>JSON</strong> si descargó el JSON plano).
+              </li>
+              <li>
+                Seleccione el archivo descargado (codificado en UTF-8 con tildes y columnas limpias como <code className="bg-white px-1 py-0.5 rounded border border-slate-200">Ubicacion_Mapa</code> y <code className="bg-white px-1 py-0.5 rounded border border-slate-200">Tipo_Falla</code>) y presione <strong>Cargar</strong>.
+              </li>
+              <li>
+                También puede hacer doble clic en el archivo <strong>.PBIDS</strong> para iniciar Power BI conectado al endpoint <code className="bg-white px-1 py-0.5 rounded border border-slate-200">/api/export/powerbi</code>.
+              </li>
+            </ol>
+          </div>
+        )}
       </div>
 
       {/* District Interactive Selector Bar */}

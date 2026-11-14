@@ -701,22 +701,17 @@ export default function App() {
                       </span>
                     </div>
 
-                    {/* Banner de Caso de Titulación para el Jurado si corresponde */}
+                    {/* Banner de Caso detectado si corresponde */}
                     {latestZabbixAlert.casoNumero && (
-                      <div className="p-3.5 rounded-xl bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 border border-indigo-200/80 space-y-1 shadow-xs">
+                      <div className="p-3 rounded-xl bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 border border-indigo-200/80 shadow-xs">
                         <div className="flex items-center justify-between">
                           <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold bg-indigo-600 text-white uppercase tracking-wider">
                             ★ {latestZabbixAlert.casoNombre || `Caso ${latestZabbixAlert.casoNumero}`}
                           </span>
                           <span className="text-[10px] font-mono font-bold text-indigo-700">
-                            Escenario de Demostración
+                            Detección Automática
                           </span>
                         </div>
-                        {latestZabbixAlert.casoHistoriaJurado && (
-                          <p className="text-xs text-indigo-950 font-medium leading-relaxed pt-1">
-                            <strong>Historia para el Jurado:</strong> "{latestZabbixAlert.casoHistoriaJurado}"
-                          </p>
-                        )}
                       </div>
                     )}
 
@@ -1180,13 +1175,6 @@ export default function App() {
                           <p className="text-xs text-slate-500 line-clamp-1">
                             {ticket.description}
                           </p>
-
-                          {ticket.casoHistoriaJurado && (
-                            <div className="text-[11px] font-medium text-slate-700 bg-amber-50/80 border border-amber-200/90 rounded-lg px-2.5 py-1 flex items-start gap-1.5">
-                              <span className="font-bold text-amber-900 shrink-0">🎓 Historia Jurado:</span>
-                              <span className="italic text-slate-700">&ldquo;{ticket.casoHistoriaJurado}&rdquo;</span>
-                            </div>
-                          )}
 
                           <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-400 pt-1">
                             <span>Reportado por: {ticket.reporterName} ({ticket.reporterRole})</span>

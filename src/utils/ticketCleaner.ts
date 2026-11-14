@@ -45,7 +45,6 @@ export function cleanAndEnrichTicket(rawTicket: any): Ticket {
   let finalDesc = currentDesc;
   let casoNumero: 1 | 2 | 3 | undefined = rawTicket.casoNumero;
   let casoNombre: string | undefined = rawTicket.casoNombre;
-  let casoHistoriaJurado: string | undefined = rawTicket.casoHistoriaJurado;
   let tipoFalla = rawTicket.tipoFalla || 'Hardware Aula / AIP';
   let priority = rawTicket.priority || 'high';
 
@@ -63,8 +62,6 @@ export function cleanAndEnrichTicket(rawTicket: any): Ticket {
   ) {
     casoNumero = 1;
     casoNombre = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
-    casoHistoriaJurado =
-      'Personal de limpieza o un alumno desconecta por error el cable UTP del equipo PC-ALUMNO-01 durante el mantenimiento del laboratorio.';
     priority = 'urgent';
     tipoFalla = 'Red y Conectividad';
 
@@ -84,8 +81,6 @@ export function cleanAndEnrichTicket(rawTicket: any): Ticket {
   ) {
     casoNumero = 2;
     casoNombre = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
-    casoHistoriaJurado =
-      'Un alumno ejecuta un proceso en bucle infinito o software no autorizado que bloquea el procesador del equipo.';
     priority = 'high';
     tipoFalla = 'Hardware Aula / AIP';
     finalTitle = `Sobrecarga Crítica de Procesador CPU (>95%) · ${hostName}`;
@@ -98,8 +93,6 @@ export function cleanAndEnrichTicket(rawTicket: any): Ticket {
   ) {
     casoNumero = 3;
     casoNombre = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
-    casoHistoriaJurado =
-      'Falla inesperada del servicio de monitoreo o intento de detener los procesos de control en la estación de trabajo.';
     priority = 'high';
     tipoFalla = 'Servidor y Servicios';
     finalTitle = `Interrupción de Servicio Crítico del Agente de Monitoreo · ${hostName}`;
@@ -129,6 +122,12 @@ export function cleanAndEnrichTicket(rawTicket: any): Ticket {
     }
   }
 
+  // Strip any leftover "Historia para el jurado" text
+  finalDesc = finalDesc
+    .replace(/Historia para el jurado:[^.]*\./gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
   // Double check: absolutely no "Alerta Zabbix"
   finalTitle = finalTitle
     .replace(/Alerta Zabbix SNMP:\s*/gi, '')
@@ -145,13 +144,13 @@ export function cleanAndEnrichTicket(rawTicket: any): Ticket {
     rawTicket.vmTimestamp ||
     (rawTicket.createdAt ? `${rawTicket.createdAt} (GMT-5 / UTC-5)` : '2026-11-07 10:00:00 (GMT-5 / UTC-5)');
 
-  // 6. Clean UGEL 07 references
+  // 6. Clean institutional references
   const cleanUgel = 'Mesa de Ayuda';
   const cleanEmail = (rawTicket.reporterEmail || 'telemetria@edudesk.edu.pe').replace(/@ugel07\.(gob|edu)\.pe/g, '@edudesk.edu.pe');
   const cleanSchool = (rawTicket.schoolName || 'I.E. Antenor Orrego Espinoza').replace(/UGEL\s*07/gi, 'Sede');
   const cleanSede = (rawTicket.sede || `Sede Central · ${hostName}`).replace(/UGEL\s*07/gi, 'Sede');
 
-  return {
+  const cleanedTicket: any = {
     ...rawTicket,
     title: finalTitle,
     titulo: finalTitle,
@@ -161,7 +160,6 @@ export function cleanAndEnrichTicket(rawTicket: any): Ticket {
     tipoFalla,
     casoNumero,
     casoNombre,
-    casoHistoriaJurado,
     ugel: cleanUgel,
     schoolName: cleanSchool,
     sede: cleanSede,
@@ -170,4 +168,6 @@ export function cleanAndEnrichTicket(rawTicket: any): Ticket {
     vmTimestamp,
     zonaHorariaVM: 'GMT-5 (UTC-5 Perú / VMware)',
   };
+  delete cleanedTicket.casoHistoriaJurado;
+  return cleanedTicket as Ticket;
 }
