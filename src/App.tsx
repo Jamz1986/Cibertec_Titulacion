@@ -192,28 +192,43 @@ export default function App() {
     };
 
     const fetchRecentWebhookTickets = async () => {
-      // 1. Fetch from local backend
+      // 1. Fetch from local / current origin backend (/api/tickets/recent)
       try {
         const res = await fetch('/api/tickets/recent');
         if (res.ok) {
           const data = await res.json();
-          if (data.success && Array.isArray(data.tickets) && data.tickets.length > 0) {
-            setZabbixWebhookEventCount(data.count || data.tickets.length);
-            handleIncomingTicketsList(data.tickets as Ticket[]);
+          const list = Array.isArray(data.tickets)
+            ? data.tickets
+            : Array.isArray(data.recentTickets)
+            ? data.recentTickets
+            : [];
+          if (list.length > 0) {
+            setZabbixWebhookEventCount(data.count || data.recentCount || list.length);
+            handleIncomingTicketsList(list as Ticket[]);
           }
         }
       } catch {}
 
-      // 2. Also fetch from Vercel endpoint in case teammate sends to Vercel (Captura de pantalla)
-      try {
-        const vercelRes = await fetch('https://cibertec-titulacion.vercel.app/api/webhooks/zabbix');
-        if (vercelRes.ok) {
-          const vData = await vercelRes.json();
-          if (Array.isArray(vData.recentTickets) && vData.recentTickets.length > 0) {
-            handleIncomingTicketsList(vData.recentTickets as Ticket[]);
+      // 2. Also fetch from Vercel endpoint if running locally/Cloud Run
+      if (
+        typeof window !== 'undefined' &&
+        !window.location.hostname.includes('vercel.app')
+      ) {
+        try {
+          const vercelRes = await fetch('https://cibertec-titulacion.vercel.app/api/webhooks/zabbix');
+          if (vercelRes.ok) {
+            const vData = await vercelRes.json();
+            const vList = Array.isArray(vData.tickets)
+              ? vData.tickets
+              : Array.isArray(vData.recentTickets)
+              ? vData.recentTickets
+              : [];
+            if (vList.length > 0) {
+              handleIncomingTicketsList(vList as Ticket[]);
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      }
     };
 
     fetchRecentWebhookTickets();

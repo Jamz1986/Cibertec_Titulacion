@@ -6,8 +6,16 @@
       "destination": "/api/webhooks/zabbix"
     },
     {
+      "source": "/api/webhooks/zabbix/",
+      "destination": "/api/webhooks/zabbix"
+    },
+    {
       "source": "/api/tickets/recent",
       "destination": "/api/webhooks/zabbix"
+    },
+    {
+      "source": "/api/export/powerbi",
+      "destination": "/api/webhooks/zabbix?format=powerbi"
     },
     {
       "source": "/((?!api/).*)",

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { useAuth, TEAM_MEMBERS } from '../context/AuthContext';
+import { useAuth } from '../context/AuthContext';
 import {
   Server,
   ShieldCheck,
@@ -17,8 +17,8 @@ import {
 
 export const LoginPortal: React.FC = () => {
   const { login } = useAuth();
-  const [identifier, setIdentifier] = useState('jhinojosa');
-  const [password, setPassword] = useState('hinojosa2026');
+  const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -30,12 +30,6 @@ export const LoginPortal: React.FC = () => {
     if (!result.success) {
       setLoginError(result.error || 'Credenciales inválidas.');
     }
-  };
-
-  const handleFillCredentials = (user: string, pass: string) => {
-    setIdentifier(user);
-    setPassword(pass);
-    setLoginError(null);
   };
 
   return (
@@ -160,7 +154,7 @@ export const LoginPortal: React.FC = () => {
                       type="text"
                       value={identifier}
                       onChange={(e) => setIdentifier(e.target.value)}
-                      placeholder="ej: jhinojosa o jhinojosa@cibertec.edu.pe"
+                      placeholder="usuario@cibertec.edu.pe"
                       className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-hidden transition-colors"
                       required
                     />
@@ -199,45 +193,6 @@ export const LoginPortal: React.FC = () => {
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </form>
-
-              {/* Official Credentials Directory for the 4 Team Members */}
-              <div className="pt-4 border-t border-slate-800 space-y-2.5">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
-                    <ShieldCheck className="w-3.5 h-3.5 text-indigo-400" />
-                    <span>Credenciales de los 4 Integrantes</span>
-                  </span>
-                  <span className="text-[10px] text-slate-500 font-mono">
-                    Clic para autocompletar
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                  {TEAM_MEMBERS.map((member) => (
-                    <button
-                      key={member.id}
-                      type="button"
-                      onClick={() => handleFillCredentials(member.username, member.password)}
-                      className="p-2.5 rounded-lg border border-slate-800 bg-slate-950/60 hover:bg-slate-800/80 hover:border-indigo-500/50 transition-all text-left cursor-pointer group"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-slate-200 text-[11px] group-hover:text-indigo-300">
-                          {member.nombre.split(' ')[0]} {member.nombre.split(' ')[1] || ''}
-                        </span>
-                        <span className="text-[9px] font-mono px-1 rounded bg-slate-800 text-slate-400">
-                          {member.rol}
-                        </span>
-                      </div>
-                      <p className="text-[10px] text-slate-400 font-mono mt-0.5">
-                        User: <strong className="text-white">{member.username}</strong>
-                      </p>
-                      <p className="text-[10px] text-slate-400 font-mono">
-                        Pass: <strong className="text-indigo-300">{member.password}</strong>
-                      </p>
-                    </button>
-                  ))}
-                </div>
-              </div>
 
               {/* Institutional Notice */}
               <div className="pt-2 text-[10px] text-slate-500 leading-normal flex items-start gap-1.5">

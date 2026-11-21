@@ -24,7 +24,10 @@ export const ShareDeployModal: React.FC<ShareDeployModalProps> = ({ isOpen, onCl
 
   if (!isOpen) return null;
 
-  const sharedAppUrl = 'https://ais-pre-kzl72i7vitrkbyopieu6nv-542924610480.us-east1.run.app';
+  const sharedAppUrl =
+    typeof window !== 'undefined' && window.location.origin
+      ? window.location.origin
+      : 'https://cibertec-titulacion.vercel.app';
 
   const copyToClipboard = (text: string, key: string) => {
     navigator.clipboard.writeText(text);

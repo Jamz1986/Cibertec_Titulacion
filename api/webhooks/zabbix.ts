@@ -80,14 +80,38 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'GET') {
     const current = getCachedTickets();
+    if (req.url?.includes('powerbi') || req.query?.format === 'powerbi') {
+      const rows = current.map((t) => ({
+        Codigo_Ticket: t.code,
+        Fecha_Hora_GMT5: t.createdAt,
+        Hora_VM: t.horaIncidenciaVM || t.createdAt,
+        Distrito: t.distrito || 'Miraflores',
+        Institucion_Educativa: t.schoolName,
+        Ambiente_Laboratorio: t.classroomLab,
+        Tipo_Falla: t.tipoFalla || 'Hardware Aula / AIP',
+        Prioridad: t.priority,
+        Estado: t.status,
+        Origen: t.origen,
+        SLA_Objetivo_Horas: t.slaTargetHours,
+        Titulo_Problema: t.title,
+        Reportante: t.reporterName,
+        IP_Dispositivo: t.telemetriaZabbix?.ipDispositivo || '',
+        Latencia_ms: t.telemetriaZabbix?.latenciaMs ?? 0,
+        Perdida_Paquetes_Pct: t.telemetriaZabbix?.perdidaPaquetesPct ?? 0,
+      }));
+      return res.status(200).json(rows);
+    }
     return res.status(200).json({
+      success: true,
       status: 'online',
       service: 'EduDesk Zabbix Webhook API (Vercel Serverless)',
       method: 'POST',
       endpoint: '/api/webhooks/zabbix',
       acceptedFormats: ['application/json', 'application/x-www-form-urlencoded', 'text/plain'],
+      count: current.length,
+      tickets: current,
       recentCount: current.length,
-      recentTickets: current.slice(0, 10),
+      recentTickets: current.slice(0, 15),
     });
   }
 
