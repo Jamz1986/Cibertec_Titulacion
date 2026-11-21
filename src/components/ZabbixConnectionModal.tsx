@@ -239,14 +239,14 @@ export const ZabbixConnectionModal: React.FC<ZabbixConnectionModalProps> = ({
             <p className="text-[11px] text-slate-600 leading-relaxed">
               Para que el ticket se genere desde la máquina virtual de tu compañero, él debe realizar cualquiera de estas dos acciones en el equipo monitoreado:
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
               <div className="p-3 rounded-lg bg-white border border-slate-200">
-                <span className="font-bold text-slate-800 text-[11px] block">Opción A: Detener el Agente Zabbix</span>
+                <span className="font-bold text-slate-800 text-[11px] block">Opción A: Desconexión / Agente</span>
                 <p className="text-[10px] text-slate-500 mt-0.5">En Windows (CMD como Admin):</p>
                 <code className="block bg-slate-900 text-emerald-400 p-1.5 rounded font-mono text-[10px] mt-1 select-all">
-                  net stop "Zabbix Agent"
+                  net stop &quot;Zabbix Agent&quot;
                 </code>
-                <p className="text-[10px] text-slate-500 mt-1">Zabbix detectará nodata tras 30s y enviará el webhook automáticamente.</p>
+                <p className="text-[10px] text-slate-500 mt-1">Zabbix detectará pérdida de respuesta y enviará el webhook.</p>
               </div>
               <div className="p-3 rounded-lg bg-white border border-slate-200">
                 <span className="font-bold text-slate-800 text-[11px] block">Opción B: Sobrecarga de CPU (&gt;95%)</span>
@@ -255,6 +255,14 @@ export const ZabbixConnectionModal: React.FC<ZabbixConnectionModalProps> = ({
                   while($true)&#123;&#125;
                 </code>
                 <p className="text-[10px] text-slate-500 mt-1">Llevará la CPU al 100% y disparará la alarma de alta utilización.</p>
+              </div>
+              <div className="p-3 rounded-lg bg-white border border-slate-200">
+                <span className="font-bold text-slate-800 text-[11px] block">Opción C: Saturación de RAM (&gt;85%)</span>
+                <p className="text-[10px] text-slate-500 mt-0.5">En PowerShell (consumo dinámico):</p>
+                <code className="block bg-slate-900 text-emerald-400 p-1.5 rounded font-mono text-[10px] mt-1 select-all">
+                  $a=@(); while($true)&#123;$a+=New-Object byte[] 100MB; Start-Sleep -Milliseconds 300&#125;
+                </code>
+                <p className="text-[10px] text-slate-500 mt-1">Supera el 85% de RAM y activa la alerta de saturación.</p>
               </div>
             </div>
           </div>

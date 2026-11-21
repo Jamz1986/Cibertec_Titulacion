@@ -118,7 +118,15 @@ export const DistrictFailureDashboard: React.FC<DistrictFailureDashboardProps> =
       let f = t.tipoFalla;
       if (!f) {
         const text = `${t.title} ${t.description} ${t.category}`.toLowerCase();
-        if (text.includes('cpu') || text.includes('ram') || text.includes('hardware') || text.includes('fuente') || text.includes('puesto')) {
+        if (
+          text.includes('cpu') ||
+          text.includes('ram') ||
+          text.includes('memoria') ||
+          text.includes('memory') ||
+          text.includes('hardware') ||
+          text.includes('fuente') ||
+          text.includes('puesto')
+        ) {
           f = 'Hardware Aula / AIP';
         } else if (text.includes('switch') || text.includes('red') || text.includes('fibra') || text.includes('enlace') || text.includes('vlan') || text.includes('paquetes')) {
           f = 'Red y Conectividad';

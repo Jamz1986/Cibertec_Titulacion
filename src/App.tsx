@@ -139,8 +139,26 @@ export default function App() {
     const handleIncomingTicketsList = (incoming: Ticket[]) => {
       const cleanedIncoming = incoming.map((t) => cleanAndEnrichTicket(t));
       setTickets((prev) => {
-        const existingIds = new Set(prev.map((t) => t.id));
-        const newTickets = cleanedIncoming.filter((t) => !existingIds.has(t.id));
+        const existingMap = new Map(prev.map((t) => [t.id, t]));
+        const newTickets = cleanedIncoming.filter((t) => !existingMap.has(t.id));
+
+        // Detect status/metric updates on existing tickets (e.g., RESOLVED from Zabbix)
+        let hasUpdates = false;
+        const incomingById = new Map(cleanedIncoming.map((t) => [t.id, t]));
+        const updatedPrev = prev.map((t) => {
+          const match = incomingById.get(t.id);
+          if (
+            match &&
+            (match.status !== t.status ||
+              match.valorActual !== t.valorActual ||
+              match.comments.length !== t.comments.length)
+          ) {
+            hasUpdates = true;
+            return match;
+          }
+          return t;
+        });
+
         if (newTickets.length > 0) {
           setLatestZabbixAlert(newTickets[0]);
           playAlertChime();
@@ -156,7 +174,7 @@ export default function App() {
               t.sinistroZonal ||
               t.outageCause === 'CORTE_ELECTRICO_MASIVO' ||
               t.telemetriaZabbix?.probableCausa === 'CORTE_ELECTRICO_MASIVO' ||
-              t.priority === 'urgent'
+              (t.priority === 'urgent' && t.casoNumero === 1)
             ) {
               setCriticalBlackoutAlert({
                 ticket: t,
@@ -167,9 +185,9 @@ export default function App() {
               setPhoneTargetSchool(t.schoolName);
             }
           });
-          return [...newTickets, ...prev];
+          return [...newTickets, ...updatedPrev];
         }
-        return prev;
+        return hasUpdates ? updatedPrev : prev;
       });
     };
 
@@ -1133,10 +1151,12 @@ export default function App() {
                                   ? 'bg-rose-100 text-rose-800 border-rose-300'
                                   : ticket.casoNumero === 2
                                   ? 'bg-amber-100 text-amber-800 border-amber-300'
+                                  : ticket.casoNumero === 4
+                                  ? 'bg-orange-100 text-orange-800 border-orange-300'
                                   : 'bg-indigo-100 text-indigo-800 border-indigo-300'
                               }`}>
                                 <span className="w-1.5 h-1.5 rounded-full bg-current animate-pulse" />
-                                <span>Caso {ticket.casoNumero}: {ticket.casoNombre?.replace(/Caso \d: /, '') || 'Demostración'}</span>
+                                <span>Caso {ticket.casoNumero}: {ticket.casoNombre?.replace(/Caso \d:\s*/, '') || 'Demostración'}</span>
                               </span>
                             )}
                             {ticket.origen === 'AUTOMATICO' ? (

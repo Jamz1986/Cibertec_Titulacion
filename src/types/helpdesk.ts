@@ -170,6 +170,14 @@ export interface Ticket {
   horaIncidenciaVM?: string; // e.g. "09:58:21 (GMT-5)"
   zonaHorariaVM?: string; // e.g. "GMT-5 (UTC-5 Perú / VMware)"
   // Escenarios de Demostración
-  casoNumero?: 1 | 2 | 3;
+  casoNumero?: 1 | 2 | 3 | 4;
   casoNombre?: string;
+  // Metadatos de Deduplicación y Payload Zabbix
+  eventoZabbixId?: string;
+  hostName?: string;
+  rawEventName?: string;
+  estadoEvento?: 'PROBLEM' | 'RESOLVED';
+  valorActual?: string;
+  tipoDispositivo?: string;
+  ubicacion?: string;
 }

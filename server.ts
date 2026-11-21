@@ -67,8 +67,15 @@ interface StoredWebhookTicket {
   vmTimestamp?: string;
   horaIncidenciaVM?: string;
   zonaHorariaVM?: string;
-  casoNumero?: 1 | 2 | 3;
+  casoNumero?: 1 | 2 | 3 | 4;
   casoNombre?: string;
+  eventoZabbixId?: string;
+  hostName?: string;
+  rawEventName?: string;
+  estadoEvento?: 'PROBLEM' | 'RESOLVED';
+  valorActual?: string;
+  tipoDispositivo?: string;
+  ubicacion?: string;
   telemetriaZabbix?: {
     lastGaspReceived: boolean;
     heartbeatConsecutiveFails: number;
@@ -122,16 +129,27 @@ interface WebhookLogEntry {
 
 let webhookLogs: WebhookLogEntry[] = [];
 
-// Helper function to map Zabbix severity to EduDesk priority
+// Regla de Mapeo de severity (Zabbix) -> prioridad (EduDesk):
+// Disaster / High -> URGENTE ('urgent')
+// Average -> ALTA ('high')
+// Warning -> MEDIA ('medium')
+// Information -> BAJA ('low')
 function mapZabbixSeverityToPriority(severity?: string): 'low' | 'medium' | 'high' | 'urgent' {
-  if (!severity) return 'high';
-  const s = String(severity).toLowerCase();
-  if (s.includes('disaster') || s.includes('desastre') || s.includes('5')) return 'urgent';
-  if (s.includes('high') || s.includes('alta') || s.includes('alto') || s.includes('4')) return 'high';
-  if (s.includes('average') || s.includes('media') || s.includes('medio') || s.includes('3')) return 'medium';
-  if (s.includes('warning') || s.includes('advertencia') || s.includes('2')) return 'medium';
-  if (s.includes('info') || s.includes('information') || s.includes('1')) return 'low';
-  return 'high';
+  if (!severity) return 'urgent';
+  const s = String(severity).toLowerCase().trim();
+  if (s.includes('disaster') || s.includes('desastre') || s.includes('high') || s.includes('alta') || s.includes('alto') || s === '5' || s === '4') {
+    return 'urgent';
+  }
+  if (s.includes('average') || s.includes('alta_media') || s === '3') {
+    return 'high';
+  }
+  if (s.includes('warning') || s.includes('advertencia') || s.includes('media') || s.includes('medio') || s === '2') {
+    return 'medium';
+  }
+  if (s.includes('info') || s.includes('information') || s.includes('baja') || s.includes('not classified') || s === '1' || s === '0') {
+    return 'low';
+  }
+  return 'urgent';
 }
 
 // ==========================================
@@ -172,133 +190,116 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         }
       }
 
-      const hostName =
+      const eventoZabbixId = String(
+        payload?.evento_zabbix_id ||
+          payload?.event_id ||
+          payload?.EVENT_ID ||
+          ''
+      ).trim();
+
+      const hostName = String(
         payload?.host_name ||
-        payload?.hostname ||
-        payload?.host ||
-        payload?.HOST ||
-        payload?.equipo ||
-        payload?.target ||
-        'servidor-zabbix';
+          payload?.hostname ||
+          payload?.host ||
+          payload?.HOST ||
+          payload?.equipo ||
+          payload?.target ||
+          'PC-ALUMNO-01'
+      ).trim();
 
-      const hostIp =
+      const hostIp = String(
         payload?.ip ||
-        payload?.host_ip ||
-        payload?.ipDispositivo ||
-        payload?.IP ||
-        payload?.ip_address ||
-        '192.168.40.10';
+          payload?.host_ip ||
+          payload?.ipDispositivo ||
+          payload?.IP ||
+          payload?.ip_address ||
+          '192.168.30.15'
+      ).trim();
 
-      const eventName =
+      const tipoDispositivo = String(
+        payload?.tipo_dispositivo || payload?.device_type || 'PC'
+      ).trim();
+
+      const ubicacion = String(
+        payload?.ubicacion || payload?.location || payload?.classroomLab || ''
+      ).trim();
+
+      const eventName = String(
         payload?.event_name ||
-        payload?.trigger_name ||
-        payload?.event ||
-        payload?.subject ||
-        payload?.mensaje ||
-        'Windows: Zabbix agent is not available';
+          payload?.trigger_name ||
+          payload?.event ||
+          payload?.subject ||
+          ''
+      ).trim();
 
-      const severity =
+      const rawMensajeFalla = String(
+        payload?.mensaje_falla ||
+          payload?.mensaje ||
+          payload?.descripcion ||
+          payload?.description ||
+          ''
+      ).trim();
+
+      const severity = String(
         payload?.severity ||
-        payload?.severidad ||
-        payload?.SEVERITY ||
-        payload?.event_severity ||
-        'High';
+          payload?.severidad ||
+          payload?.SEVERITY ||
+          payload?.event_severity ||
+          'High'
+      ).trim();
 
-      const itemValue =
-        payload?.item_value ||
-        payload?.valor ||
-        payload?.metric ||
-        payload?.item ||
-        '0';
+      const itemValue = String(
+        payload?.valor_actual ||
+          payload?.item_value ||
+          payload?.valor ||
+          payload?.metric ||
+          payload?.item ||
+          'N/A'
+      ).trim();
 
-      // =========================================================================
-      // Detección y Clasificación de los 3 Escenarios de Titulación para el Jurado
-      // =========================================================================
-      const normEvent = `${eventName} ${payload?.titulo || ''} ${payload?.descripcion || ''}`.toLowerCase();
+      const fechaIncidenteRaw = String(
+        payload?.fecha_incidente || payload?.fecha || ''
+      ).trim();
 
-      let casoNumero: 1 | 2 | 3 | undefined = undefined;
-      let casoNombre: string | undefined = undefined;
-      let computedTitle = '';
-      let computedDesc = '';
-      let computedPriority: 'urgent' | 'high' | 'medium' | 'low' = mapZabbixSeverityToPriority(severity);
-      let computedTipoFalla: 'Red y Conectividad' | 'Hardware Aula / AIP' | 'Servidor y Servicios' | 'Suministro Eléctrico' | 'Software Educativo' = 'Hardware Aula / AIP';
-
-      if (
-        normEvent.includes('link down') ||
-        normEvent.includes('interface') ||
-        normEvent.includes('not available') ||
-        normEvent.includes('nodata') ||
-        normEvent.includes('unreachable') ||
-        normEvent.includes('desconexion') ||
-        normEvent.includes('cable') ||
-        normEvent.includes('desconexión') ||
-        normEvent.includes('30s')
-      ) {
-        // Caso 1: Desconexión Física de Red (Disponibilidad / Red)
-        casoNumero = 1;
-        casoNombre = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
-        computedTitle = normEvent.includes('link down')
-          ? `Desconexión de Enlace de Red (Ethernet Link Down) · ${hostName}`
-          : `Desconexión Física de Cable de Red (Pérdida Total de Enlace) · ${hostName}`;
-        computedDesc = `Incidencia de Disponibilidad de Red: Pérdida total de enlace en ${hostName} (${hostIp}) por desconexión física del puerto de red. Métrica: ${itemValue}. Severidad: Crítica.`;
-        computedPriority = 'urgent';
-        computedTipoFalla = 'Red y Conectividad';
-      } else if (
-        normEvent.includes('cpu') ||
-        normEvent.includes('procesador') ||
-        normEvent.includes('>95') ||
-        normEvent.includes('utilization') ||
-        normEvent.includes('sobrecarga')
-      ) {
-        // Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)
-        casoNumero = 2;
-        casoNombre = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
-        computedTitle = `Sobrecarga Crítica de Procesador CPU (>95%) · ${hostName}`;
-        computedDesc = `Alerta Preventiva de Rendimiento: Saturación crítica de CPU en ${hostName} (${hostIp}). Métrica: ${itemValue || '98.4%'}. El monitoreo advierte la saturación de recursos antes de que el equipo se colapse.`;
-        computedPriority = 'high';
-        computedTipoFalla = 'Hardware Aula / AIP';
-      } else if (
-        normEvent.includes('service is not running') ||
-        normEvent.includes('active checks are not available') ||
-        normEvent.includes('service') ||
-        normEvent.includes('servicio') ||
-        normEvent.includes('agent service')
-      ) {
-        // Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)
-        casoNumero = 3;
-        casoNombre = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
-        computedTitle = `Interrupción de Servicio Crítico del Agente de Monitoreo · ${hostName}`;
-        computedDesc = `Alerta de Estado de Agente: Servicio de monitoreo detenido en ${hostName} (${hostIp}) por falla inesperada del servicio o detención de procesos de control.`;
-        computedPriority = 'high';
-        computedTipoFalla = 'Servidor y Servicios';
-      } else if (normEvent.includes('restarted') || normEvent.includes('reinicio')) {
-        computedTitle = `Reinicio Inesperado de Estación de Trabajo · ${hostName}`;
-        computedDesc = `La estación de trabajo ${hostName} experimentó un reinicio o apagado no programado (Uptime < 10m). Host: ${hostName} (${hostIp}). Métrica: ${itemValue}. Severidad: ${severity}.`;
-        computedPriority = 'medium';
-        computedTipoFalla = 'Hardware Aula / AIP';
-      } else {
-        // Alerta concisa sin Alerta Zabbix en el título
-        let clean = eventName
-          .replace(/\[Caso \d:[^\]]+\]/gi, '')
-          .replace(/Alerta Zabbix SNMP:\s*/gi, '')
-          .replace(/Alerta Zabbix:\s*/gi, '')
-          .replace(/Zabbix:\s*/gi, '')
-          .replace(/^Windows:\s*/gi, '')
-          .replace(/^Linux:\s*/gi, '')
-          .trim();
-        if (!clean || clean.toLowerCase().startsWith('falla en')) {
-          clean = 'Falla de Disponibilidad en Estación';
-        }
-        computedTitle = `${clean} · ${hostName}`;
-        computedDesc = `Incidencia técnica detectada en la estación ${hostName} (${hostIp}). Métrica: ${itemValue}. Severidad: ${severity}.`;
-        computedPriority = mapZabbixSeverityToPriority(severity);
-        computedTipoFalla = hostName.toLowerCase().includes('switch') || hostName.toLowerCase().includes('router')
-          ? 'Red y Conectividad'
-          : 'Hardware Aula / AIP';
-      }
+      const estadoEventoRaw = String(
+        payload?.estado_evento || payload?.event_status || 'PROBLEM'
+      )
+        .trim()
+        .toUpperCase();
+      const estadoEvento: 'PROBLEM' | 'RESOLVED' =
+        estadoEventoRaw === '0' ||
+        estadoEventoRaw === 'RESOLVED' ||
+        estadoEventoRaw === 'RESUELTO' ||
+        estadoEventoRaw === 'OK'
+          ? 'RESOLVED'
+          : 'PROBLEM';
 
       // Sincronización horaria estricta con la Máquina Virtual (VMware / Zabbix Server) en GMT-5 (UTC-5)
-      const parsePeruTime = (rawClock?: any, rawTime?: any, rawDate?: any) => {
+      const parsePeruTime = (
+        rawFechaIncidente?: string,
+        rawClock?: any,
+        rawTime?: any,
+        rawDate?: any
+      ) => {
+        if (rawFechaIncidente) {
+          const normalized = rawFechaIncidente.replace(/\./g, '-').trim();
+          const dateTimeMatch = normalized.match(
+            /^(\d{4}-\d{2}-\d{2})[T\s]+(\d{2}:\d{2}(?::\d{2})?)/
+          );
+          if (dateTimeMatch) {
+            const dPart = dateTimeMatch[1];
+            const tPart =
+              dateTimeMatch[2].length === 5
+                ? `${dateTimeMatch[2]}:00`
+                : dateTimeMatch[2];
+            return {
+              formattedDate: `${dPart} ${tPart}`,
+              timeOnly: `${tPart} (GMT-5)`,
+              vmTimestamp: `${dPart} ${tPart} (GMT-5 / UTC-5)`,
+            };
+          }
+        }
+
         let dateObj = new Date();
         if (rawClock) {
           const num = Number(rawClock);
@@ -322,12 +323,14 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
 
         const dateFormatted = `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second}`;
         const timeOnly = `${map.hour}:${map.minute}:${map.second} (GMT-5)`;
-        
-        let finalTimeOnly = rawTime ? `${rawTime} (GMT-5)` : timeOnly;
-        let finalTimestamp = rawDate && rawTime
-          ? `${rawDate} ${rawTime} (GMT-5 / UTC-5)`
-          : `${dateFormatted} (GMT-5 / UTC-5)`;
-        
+
+        const cleanRawDate = rawDate ? String(rawDate).replace(/\./g, '-') : '';
+        const finalTimeOnly = rawTime ? `${rawTime} (GMT-5)` : timeOnly;
+        const finalTimestamp =
+          cleanRawDate && rawTime
+            ? `${cleanRawDate} ${rawTime} (GMT-5 / UTC-5)`
+            : `${dateFormatted} (GMT-5 / UTC-5)`;
+
         return {
           formattedDate: dateFormatted,
           timeOnly: finalTimeOnly,
@@ -336,14 +339,257 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
       };
 
       const timeSync = parsePeruTime(
+        fechaIncidenteRaw,
         payload?.clock || payload?.timestamp || payload?.EVENT_CLOCK,
         payload?.event_time || payload?.time || payload?.EVENT_TIME,
         payload?.event_date || payload?.date || payload?.EVENT_DATE
       );
 
-      // Determinar Distrito de la UGEL 07 (Miraflores, San Borja, Santiago de Surco, San Luis, Barranco, Chorrillos, Surquillo)
-      const detectDistrict = (): 'Miraflores' | 'San Borja' | 'Santiago de Surco' | 'San Luis' | 'Barranco' | 'Chorrillos' | 'Surquillo' => {
-        const text = `${payload?.distrito || ''} ${payload?.district || ''} ${payload?.sede || ''} ${payload?.schoolName || ''} ${hostName} ${hostIp}`.toLowerCase();
+      // =========================================================================
+      // Deduplicación: Verificar alerta abierta con mismo evento_zabbix_id o host_name + event_name
+      // =========================================================================
+      receivedTickets = loadCachedTickets();
+      const effectiveRawEvent = eventName || `Incidencia automática en ${hostName}`;
+
+      const matchingIndex = receivedTickets.findIndex((t) => {
+        if (t.status === 'resolved' || t.status === 'closed') return false;
+        if (
+          eventoZabbixId &&
+          t.eventoZabbixId &&
+          String(t.eventoZabbixId) === eventoZabbixId
+        ) {
+          return true;
+        }
+        if (
+          eventName &&
+          t.hostName &&
+          t.rawEventName &&
+          t.hostName.toLowerCase() === hostName.toLowerCase() &&
+          t.rawEventName.toLowerCase() === effectiveRawEvent.toLowerCase()
+        ) {
+          return true;
+        }
+        return false;
+      });
+
+      if (estadoEvento === 'RESOLVED') {
+        if (matchingIndex !== -1) {
+          const existing = receivedTickets[matchingIndex];
+          existing.status = 'resolved';
+          existing.estadoEvento = 'RESOLVED';
+          existing.valorActual = itemValue;
+          existing.comments = [
+            ...(existing.comments || []),
+            {
+              id: `c-zbx-res-${Date.now()}`,
+              author: 'Zabbix Webhook Controller (Ubuntu / VMware)',
+              role: 'Recuperación Automática',
+              text: `Evento marcado como RESOLVED desde Zabbix. Host: ${hostName} [${hostIp}]. Valor actual: ${itemValue}. Hora VMware: ${timeSync.timeOnly}.`,
+              timestamp: timeSync.timeOnly,
+            },
+          ];
+          persistCachedTickets(receivedTickets);
+          webhookLogs.unshift({
+            id: `log-${Date.now()}`,
+            timestamp: timeSync.formattedDate,
+            method: req.method,
+            path: req.path,
+            ip: hostIp,
+            hostName,
+            eventName: `[RESOLVED] ${effectiveRawEvent}`,
+            status: 200,
+            message: `Ticket ${existing.code} marcado como resuelto por recuperación en Zabbix`,
+          });
+          if (webhookLogs.length > 30) webhookLogs.pop();
+
+          return res.status(200).json({
+            status: 'success',
+            resolved: true,
+            message: `Ticket ${existing.code} actualizado a Resuelto en EduDesk`,
+            ticketId: existing.id,
+            ticketCode: existing.code,
+            ticket: existing,
+          });
+        }
+
+        return res.status(200).json({
+          status: 'success',
+          resolved: true,
+          message: 'Evento RESOLVED procesado (sin ticket abierto pendiente).',
+        });
+      }
+
+      if (matchingIndex !== -1) {
+        const existing = receivedTickets[matchingIndex];
+        existing.valorActual = itemValue;
+        existing.horaIncidenciaVM = timeSync.timeOnly;
+        existing.vmTimestamp = timeSync.vmTimestamp;
+        persistCachedTickets(receivedTickets);
+
+        webhookLogs.unshift({
+          id: `log-${Date.now()}`,
+          timestamp: timeSync.formattedDate,
+          method: req.method,
+          path: req.path,
+          ip: hostIp,
+          hostName,
+          eventName: `[DEDUP] ${effectiveRawEvent}`,
+          status: 200,
+          message: `Evento deduplicado: ticket abierto ${existing.code} ya activo`,
+        });
+        if (webhookLogs.length > 30) webhookLogs.pop();
+
+        return res.status(200).json({
+          status: 'success',
+          deduplicated: true,
+          message: `Alerta deduplicada: el ticket ${existing.code} sigue abierto para este incidente`,
+          ticketId: existing.id,
+          ticketCode: existing.code,
+          ticket: existing,
+        });
+      }
+
+      // =========================================================================
+      // Detección y Clasificación de Escenarios (Casos 1, 2, 3 y 4: RAM > 85%)
+      // =========================================================================
+      const normEvent = `${eventName} ${rawMensajeFalla} ${payload?.titulo || ''} ${payload?.descripcion || ''}`.toLowerCase();
+
+      const cleanTitlePrefix = (str: string) =>
+        str
+          .replace(/\[Caso \d:[^\]]+\]/gi, '')
+          .replace(/Alerta Zabbix SNMP:\s*/gi, '')
+          .replace(/Alerta Zabbix:\s*/gi, '')
+          .replace(/Zabbix:\s*/gi, '')
+          .replace(/^Windows:\s*/gi, '')
+          .replace(/^Linux:\s*/gi, '')
+          .trim();
+
+      let casoNumero: 1 | 2 | 3 | 4 | undefined = undefined;
+      let casoNombre: string | undefined = undefined;
+      let computedTitle = '';
+      let defaultMensajeFalla = '';
+      const computedPriority: 'urgent' | 'high' | 'medium' | 'low' =
+        mapZabbixSeverityToPriority(severity);
+      let computedTipoFalla:
+        | 'Red y Conectividad'
+        | 'Hardware Aula / AIP'
+        | 'Servidor y Servicios'
+        | 'Suministro Eléctrico'
+        | 'Software Educativo' = 'Hardware Aula / AIP';
+
+      if (
+        normEvent.includes('ram') ||
+        normEvent.includes('memoria') ||
+        normEvent.includes('memory') ||
+        normEvent.includes('vm.memory') ||
+        normEvent.includes('pavailable') ||
+        normEvent.includes('>85') ||
+        normEvent.includes('umbral del 85')
+      ) {
+        // Caso 4: Saturación de Memoria RAM (>85%)
+        casoNumero = 4;
+        casoNombre = 'Caso 4: Saturación de Memoria RAM (>85%)';
+        const cleanedEvent = cleanTitlePrefix(eventName);
+        if (
+          cleanedEvent &&
+          (cleanedEvent.toLowerCase().includes('ram') ||
+            cleanedEvent.toLowerCase().includes('memoria')) &&
+          !cleanedEvent.toLowerCase().includes('high memory utilization')
+        ) {
+          computedTitle = cleanedEvent.includes(hostName)
+            ? cleanedEvent
+            : `${cleanedEvent} · ${hostName}`;
+        } else {
+          computedTitle = `Saturación Crítica de Memoria RAM (>85%) · ${hostName}`;
+        }
+        defaultMensajeFalla = `Consumo de memoria RAM supera el umbral crítico del 85% en ${hostName}.`;
+        computedTipoFalla = 'Hardware Aula / AIP';
+      } else if (
+        normEvent.includes('link down') ||
+        normEvent.includes('interface') ||
+        normEvent.includes('not available') ||
+        normEvent.includes('nodata') ||
+        normEvent.includes('unreachable') ||
+        normEvent.includes('desconexion') ||
+        normEvent.includes('cable') ||
+        normEvent.includes('desconexión') ||
+        normEvent.includes('tcp 10051') ||
+        normEvent.includes('30s')
+      ) {
+        // Caso 1: Desconexión Física de Red (Disponibilidad / Red)
+        casoNumero = 1;
+        casoNombre = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
+        const cleanedEvent = cleanTitlePrefix(eventName);
+        if (normEvent.includes('link down')) {
+          computedTitle = `Desconexión de Enlace de Red (Ethernet Link Down) · ${hostName}`;
+        } else if (cleanedEvent && cleanedEvent.toLowerCase().includes('desconexi')) {
+          computedTitle = cleanedEvent.includes(hostName)
+            ? cleanedEvent
+            : `${cleanedEvent} · ${hostName}`;
+        } else {
+          computedTitle = `Desconexión Física de Cable de Red (Pérdida Total de Enlace) · ${hostName}`;
+        }
+        defaultMensajeFalla = `Pérdida total de enlace en ${hostName} por desconexión física de red o falta de respuesta del agente.`;
+        computedTipoFalla = 'Red y Conectividad';
+      } else if (
+        normEvent.includes('cpu') ||
+        normEvent.includes('procesador') ||
+        normEvent.includes('>95') ||
+        normEvent.includes('utilization') ||
+        normEvent.includes('sobrecarga')
+      ) {
+        // Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)
+        casoNumero = 2;
+        casoNombre = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
+        computedTitle = `Sobrecarga Crítica de Procesador CPU (>95%) · ${hostName}`;
+        defaultMensajeFalla = `Saturación crítica de CPU en ${hostName}. El monitoreo advierte la saturación antes de que el equipo colapse.`;
+        computedTipoFalla = 'Hardware Aula / AIP';
+      } else if (
+        normEvent.includes('service is not running') ||
+        normEvent.includes('active checks are not available') ||
+        normEvent.includes('service') ||
+        normEvent.includes('servicio') ||
+        normEvent.includes('agent service')
+      ) {
+        // Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)
+        casoNumero = 3;
+        casoNombre = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
+        computedTitle = `Interrupción de Servicio Crítico del Agente de Monitoreo · ${hostName}`;
+        defaultMensajeFalla = `Servicio de monitoreo detenido en ${hostName} por falla inesperada o detención de procesos de control.`;
+        computedTipoFalla = 'Servidor y Servicios';
+      } else if (normEvent.includes('restarted') || normEvent.includes('reinicio')) {
+        computedTitle = `Reinicio Inesperado de Estación de Trabajo · ${hostName}`;
+        defaultMensajeFalla = `La estación de trabajo ${hostName} experimentó un reinicio o apagado no programado.`;
+        computedTipoFalla = 'Hardware Aula / AIP';
+      } else {
+        let clean = cleanTitlePrefix(eventName);
+        if (!clean || clean.toLowerCase().startsWith('falla en')) {
+          clean = `Incidencia automática en ${hostName}`;
+        }
+        computedTitle = clean.includes(hostName) ? clean : `${clean} · ${hostName}`;
+        defaultMensajeFalla = `Incidencia técnica detectada automáticamente en ${hostName}.`;
+        computedTipoFalla =
+          hostName.toLowerCase().includes('switch') ||
+          hostName.toLowerCase().includes('router')
+            ? 'Red y Conectividad'
+            : 'Hardware Aula / AIP';
+      }
+
+      // Regla de descripción recomendada:
+      // mensaje_falla + " | Host: " + host_name + " | IP: " + ip + " | Valor: " + valor_actual
+      const mensajeBase = rawMensajeFalla || defaultMensajeFalla;
+      const computedDesc = `${mensajeBase} | Host: ${hostName} | IP: ${hostIp} | Valor: ${itemValue}`;
+
+      // Determinar Distrito (Miraflores, San Borja, Santiago de Surco, San Luis, Barranco, Chorrillos, Surquillo)
+      const detectDistrict = ():
+        | 'Miraflores'
+        | 'San Borja'
+        | 'Santiago de Surco'
+        | 'San Luis'
+        | 'Barranco'
+        | 'Chorrillos'
+        | 'Surquillo' => {
+        const text = `${payload?.distrito || ''} ${payload?.district || ''} ${payload?.sede || ''} ${payload?.schoolName || ''} ${ubicacion} ${hostName} ${hostIp}`.toLowerCase();
         if (text.includes('surco') || text.includes('santiago')) return 'Santiago de Surco';
         if (text.includes('borja')) return 'San Borja';
         if (text.includes('luis')) return 'San Luis';
@@ -352,7 +598,6 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         if (text.includes('surquillo')) return 'Surquillo';
         if (text.includes('miraflores')) return 'Miraflores';
 
-        // Por subred IP de Laboratorios escolares UGEL 07
         if (hostIp.includes('.30.')) return 'Miraflores';
         if (hostIp.includes('.40.')) return 'San Borja';
         if (hostIp.includes('.50.')) return 'Santiago de Surco';
@@ -375,11 +620,12 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         origen: 'AUTOMATICO',
         priority: computedPriority,
         status: 'open',
-        category: computedTipoFalla === 'Red y Conectividad'
-          ? 'networking_connectivity'
-          : computedTipoFalla === 'Servidor y Servicios'
-          ? 'school_server'
-          : 'aip_hardware',
+        category:
+          computedTipoFalla === 'Red y Conectividad'
+            ? 'networking_connectivity'
+            : computedTipoFalla === 'Servidor y Servicios'
+            ? 'school_server'
+            : 'aip_hardware',
         ugel: 'Mesa de Ayuda',
         sede: payload?.sede || `Sede ${distritoAsignado} · ${hostName} (${hostIp})`,
         schoolName: payload?.schoolName || `I.E. Sede ${distritoAsignado} (${hostName})`,
@@ -387,44 +633,57 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         tipoFalla: computedTipoFalla,
         casoNumero: casoNumero,
         casoNombre: casoNombre,
+        eventoZabbixId: eventoZabbixId || undefined,
+        hostName,
+        rawEventName: effectiveRawEvent,
+        estadoEvento,
+        valorActual: itemValue,
+        tipoDispositivo,
+        ubicacion: ubicacion || undefined,
         reporterUserId: 'usr-zabbix-webhook',
         reporterName: `Sensor de Monitoreo (${hostName})`,
         reporterRole: 'Telemetría Proactiva de Red',
         reporterEmail: 'telemetria@edudesk.edu.pe',
-        classroomLab: `Estación Virtual: ${hostName} · IP ${hostIp}`,
+        classroomLab: ubicacion
+          ? `${ubicacion} · ${hostName} (${hostIp})`
+          : `Estación Virtual (${tipoDispositivo}): ${hostName} · IP ${hostIp}`,
         createdAt: timeSync.formattedDate,
         horaIncidenciaVM: timeSync.timeOnly,
         vmTimestamp: timeSync.vmTimestamp,
         zonaHorariaVM: 'GMT-5 (UTC-5 Perú / VMware)',
-        slaTargetHours: computedPriority === 'urgent' ? 2 : computedPriority === 'high' ? 8 : 24,
+        slaTargetHours:
+          computedPriority === 'urgent' ? 2 : computedPriority === 'high' ? 8 : computedPriority === 'medium' ? 24 : 48,
         telemetriaZabbix: {
           lastGaspReceived: false,
-          heartbeatConsecutiveFails: 3,
+          heartbeatConsecutiveFails: casoNumero === 1 ? 4 : 2,
           correlationConfidence: 98,
           ipDispositivo: hostIp,
-          puertoAfectado: hostName.toLowerCase().includes('switch') ? 'GigabitEthernet0/2 (Trunk)' : 'eth0 / ens33 (10050)',
-          latenciaMs: hostName.toLowerCase().includes('cpu') ? 14 : 0,
-          perdidaPaquetesPct: hostName.toLowerCase().includes('unreachable') || casoNumero === 1 ? 100 : 0,
-          anchoBandaUtilizadoMbps: 12.5,
+          puertoAfectado: hostName.toLowerCase().includes('switch')
+            ? 'GigabitEthernet0/2 (Trunk)'
+            : 'eth0 / ens33 (10050)',
+          latenciaMs: casoNumero === 1 ? 0 : 14,
+          perdidaPaquetesPct:
+            normEvent.includes('unreachable') || casoNumero === 1 ? 100 : 0,
+          anchoBandaUtilizadoMbps: casoNumero === 1 ? 0 : 12.5,
           ultimoSondeoSnmp: 'Hace 1 seg',
-          probableCausa: casoNumero === 1
-            ? 'CORTE_FIBRA_OPTICA_TRONCAL'
-            : hostName.toLowerCase().includes('switch')
-            ? 'CORTE_ENLACE_TRUNK_SWITCH'
-            : 'FALLA_LOCAL_AISLADA',
+          probableCausa:
+            casoNumero === 1
+              ? 'CORTE_FIBRA_OPTICA_TRONCAL'
+              : hostName.toLowerCase().includes('switch')
+              ? 'CORTE_ENLACE_TRUNK_SWITCH'
+              : 'FALLA_LOCAL_AISLADA',
         },
         comments: [
           {
             id: `c-zbx-${Date.now()}`,
             author: 'Zabbix Webhook Controller (Ubuntu / VMware)',
             role: 'Automatización de Incidencias',
-            text: `Evento procesado desde Zabbix Server 7.0 LTS en VMware. Host: ${hostName} [${hostIp}]. Evento: ${eventName}. Métrica: ${itemValue}. Severidad: ${severity}. Hora VMware: ${timeSync.timeOnly}. ${casoNombre ? `[${casoNombre}]` : ''}`,
+            text: `Evento procesado desde Zabbix Server 7.0 LTS en VMware. Host: ${hostName} [${hostIp}]. Evento: ${effectiveRawEvent}. Métrica: ${itemValue}. Severidad: ${severity}. Hora VMware: ${timeSync.timeOnly}. ${casoNombre ? `[${casoNombre}]` : ''}`,
             timestamp: timeSync.timeOnly,
           },
         ],
       };
 
-      receivedTickets = loadCachedTickets();
       receivedTickets.unshift(newTicket);
       if (receivedTickets.length > 50) {
         receivedTickets.pop();
@@ -437,16 +696,16 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         timestamp: timeSync.formattedDate,
         method: req.method,
         path: req.path,
-        ip: req.ip || req.socket.remoteAddress || '192.168.40.10',
+        ip: req.ip || req.socket.remoteAddress || hostIp,
         hostName: hostName,
-        eventName: eventName,
+        eventName: effectiveRawEvent,
         status: 200,
         message: `Ticket ${newTicket.code} creado exitosamente para host ${hostName}`,
       };
       webhookLogs.unshift(logEntry);
       if (webhookLogs.length > 30) webhookLogs.pop();
 
-      console.log(`[Zabbix Webhook] HTTP 200 OK -> Created ${newTicket.code} for ${hostName} (${eventName})`);
+      console.log(`[Zabbix Webhook] HTTP 200 OK -> Created ${newTicket.code} for ${hostName} (${effectiveRawEvent})`);
 
       return res.status(200).json({
         status: 'success',
@@ -722,34 +981,45 @@ async function setupServer() {
                 const m = vt.comments[0].text.match(/Evento:\s*([^.]+?)(?:\.|\s*Métrica:)/i);
                 if (m && m[1]) realEvent = m[1].trim();
               }
-              const lower = realEvent.toLowerCase();
+              const lower = `${realEvent} ${vt.description || ''}`.toLowerCase();
               let cleanTitle = 'Falla Técnica en Estación';
-              let casoNum: 1 | 2 | 3 | undefined = undefined;
-              let casoNom: string | undefined = undefined;
+              let casoNum: 1 | 2 | 3 | 4 | undefined = vt.casoNumero;
+              let casoNom: string | undefined = vt.casoNombre;
               let tipo: 'Red y Conectividad' | 'Hardware Aula / AIP' | 'Servidor y Servicios' = 'Hardware Aula / AIP';
 
-              if (lower.includes('link down') || lower.includes('interface')) {
-                cleanTitle = 'Desconexión de Enlace de Red (Ethernet Link Down) · PC-ALUMNO-01';
+              if (
+                lower.includes('ram') ||
+                lower.includes('memoria') ||
+                lower.includes('memory') ||
+                lower.includes('>85') ||
+                lower.includes('pavailable')
+              ) {
+                cleanTitle = `Saturación Crítica de Memoria RAM (>85%) · ${vt.hostName || 'PC-ALUMNO-01'}`;
+                casoNum = 4;
+                casoNom = 'Caso 4: Saturación de Memoria RAM (>85%)';
+                tipo = 'Hardware Aula / AIP';
+              } else if (lower.includes('link down') || lower.includes('interface')) {
+                cleanTitle = `Desconexión de Enlace de Red (Ethernet Link Down) · ${vt.hostName || 'PC-ALUMNO-01'}`;
                 casoNum = 1;
                 casoNom = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
                 tipo = 'Red y Conectividad';
-              } else if (lower.includes('active checks') || lower.includes('not available')) {
-                cleanTitle = 'Pérdida de Conectividad con Agente de Monitoreo · PC-ALUMNO-01';
+              } else if (lower.includes('active checks') || lower.includes('not available') || lower.includes('unreachable') || lower.includes('desconexi')) {
+                cleanTitle = `Desconexión Física de Red (Agente Inaccesible) · ${vt.hostName || 'PC-ALUMNO-01'}`;
                 casoNum = 1;
                 casoNom = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
                 tipo = 'Red y Conectividad';
               } else if (lower.includes('cpu')) {
-                cleanTitle = 'Sobrecarga Crítica de Procesador CPU (>95%) · PC-ALUMNO-01';
+                cleanTitle = `Sobrecarga Crítica de Procesador CPU (>95%) · ${vt.hostName || 'PC-ALUMNO-01'}`;
                 casoNum = 2;
                 casoNom = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
                 tipo = 'Hardware Aula / AIP';
               } else if (lower.includes('service')) {
-                cleanTitle = 'Interrupción de Servicio Crítico del Agente de Monitoreo · PC-ALUMNO-01';
+                cleanTitle = `Interrupción de Servicio Crítico del Agente de Monitoreo · ${vt.hostName || 'PC-ALUMNO-01'}`;
                 casoNum = 3;
                 casoNom = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
                 tipo = 'Servidor y Servicios';
               } else if (lower.includes('restarted')) {
-                cleanTitle = 'Reinicio Inesperado de Estación de Trabajo · PC-ALUMNO-01';
+                cleanTitle = `Reinicio Inesperado de Estación de Trabajo · ${vt.hostName || 'PC-ALUMNO-01'}`;
                 tipo = 'Hardware Aula / AIP';
               }
 
@@ -763,7 +1033,7 @@ async function setupServer() {
                 casoNombre: casoNom,
                 reporterEmail: 'telemetria@edudesk.edu.pe',
                 horaIncidenciaVM: vt.horaIncidenciaVM || '10:00:00 (GMT-5)',
-                vmTimestamp: vt.vmTimestamp || `${vt.createdAt || '2026-11-07 10:00:00'} (GMT-5 / UTC-5)`,
+                vmTimestamp: vt.vmTimestamp || `${vt.createdAt || '2026-11-20 10:00:00'} (GMT-5 / UTC-5)`,
                 zonaHorariaVM: 'GMT-5 (UTC-5 Perú / VMware)',
               };
               cache.unshift(normalizedTicket);
