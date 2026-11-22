@@ -156,6 +156,9 @@ export interface Ticket {
   slaTargetHours: number;
   assignedTechnician?: string;
   asignadoA?: string;
+  assignmentNote?: string;
+  assignedBy?: string;
+  assignedAt?: string;
   acknowledgedBy?: string;
   acknowledgedAt?: string;
   duplicateAlertCount?: number;

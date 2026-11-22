@@ -75,7 +75,7 @@ export const AssignedTicketsView: React.FC<AssignedTicketsViewProps> = ({
             <span>Mis Tickets Asignados</span>
           </h1>
           <p className="text-xs text-slate-500 mt-0.5">
-            Incidencias derivadas a su atención por el Coordinador / Administrador para diagnóstico, pruebas y resolución.
+            Incidencias derivadas a su atención por el Administrador junto con el resumen e indicaciones técnicas del problema.
           </p>
         </div>
 
@@ -214,6 +214,26 @@ export const AssignedTicketsView: React.FC<AssignedTicketsViewProps> = ({
 
                     <h3 className="text-sm font-bold text-slate-900">{ticket.title}</h3>
                     <p className="text-xs text-slate-500 line-clamp-1">{ticket.description}</p>
+
+                    {ticket.assignmentNote && (
+                      <div className="mt-2 p-2.5 rounded-xl bg-indigo-50/80 border border-indigo-200 text-xs text-indigo-950 space-y-1">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-700">
+                            Mensaje e Indicaciones del Administrador
+                          </span>
+                          {(ticket.assignedBy || ticket.assignedAt) && (
+                            <span className="text-[10px] font-mono text-indigo-600">
+                              {ticket.assignedBy ? `Por: ${ticket.assignedBy}` : ''}
+                              {ticket.assignedBy && ticket.assignedAt ? ' · ' : ''}
+                              {ticket.assignedAt || ''}
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-800 leading-relaxed whitespace-pre-wrap">
+                          {ticket.assignmentNote}
+                        </p>
+                      </div>
+                    )}
 
                     <div className="flex items-center gap-2 text-[11px] text-slate-400">
                       <span className="inline-flex items-center gap-1 font-mono bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">

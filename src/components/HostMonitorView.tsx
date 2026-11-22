@@ -133,7 +133,7 @@ export const HostMonitorView: React.FC<HostMonitorViewProps> = ({ token, onSelec
         <div>
           <div className="flex items-center gap-2">
             <span className="text-xs font-bold uppercase tracking-wider text-indigo-700">
-              Monitoreo en Vivo (CU-10)
+              Monitoreo en Vivo
             </span>
             <span className="text-xs text-slate-300">·</span>
             <span className="text-xs font-medium text-emerald-600">

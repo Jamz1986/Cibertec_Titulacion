@@ -449,7 +449,7 @@ Test-SchoolVMCompatibility -VMName "MINEDU-Moodle-Proxy"`;
               <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-900 text-sm">
-                    CU-01: Registro de Incidencia con Clasificación de Prioridad Multinivel
+                    Registro de Incidencia con Clasificación de Prioridad Multinivel
                   </span>
                   <span className="font-mono text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
                     Actor: Docente DAIP / Coordinador CIST
@@ -466,7 +466,7 @@ Test-SchoolVMCompatibility -VMName "MINEDU-Moodle-Proxy"`;
               <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-900 text-sm">
-                    CU-02: Triaje Inteligente y Sugerencia de Prioridad
+                    Triaje Inteligente y Sugerencia de Prioridad
                   </span>
                   <span className="font-mono text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
                     Actor: Agente Software de Triaje
@@ -483,7 +483,7 @@ Test-SchoolVMCompatibility -VMName "MINEDU-Moodle-Proxy"`;
               <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-900 text-sm">
-                    CU-03: Prueba Automatizada de Compatibilidad VMware (Pre-Flight Test)
+                    Prueba Automatizada de Compatibilidad VMware (Pre-Flight Test)
                   </span>
                   <span className="font-mono text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
                     Actor: Especialista TI / Validador VMware
@@ -500,7 +500,7 @@ Test-SchoolVMCompatibility -VMName "MINEDU-Moodle-Proxy"`;
               <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-900 text-sm">
-                    CU-04: Reclasificación y Despacho Técnico de Mesa de Ayuda
+                    Reclasificación y Despacho Técnico de Mesa de Ayuda
                   </span>
                   <span className="font-mono text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
                     Actor: Especialista TI UGEL
@@ -514,7 +514,7 @@ Test-SchoolVMCompatibility -VMName "MINEDU-Moodle-Proxy"`;
               <div className="p-4 rounded-xl border border-slate-200 bg-slate-50/50 space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-slate-900 text-sm">
-                    CU-05: Auditoría y Reportería de Rendimiento Técnico (MTTR y SLA)
+                    Auditoría y Reportería de Rendimiento Técnico (MTTR y SLA)
                   </span>
                   <span className="font-mono text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded">
                     Actor: Administrador DRELM / Investigador

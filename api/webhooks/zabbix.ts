@@ -187,6 +187,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     }
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
     const asignadoA = String(body?.asignadoA || '').trim();
+    const assignmentNote = String(body?.assignmentNote || '').trim();
     if (!asignadoA) {
       return res.status(400).json({ success: false, error: 'Debe indicar el técnico asignado.' });
     }
@@ -197,8 +198,14 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(404).json({ success: false, error: 'Ticket no encontrado en caché del servidor.' });
     }
     const prevStatus = cache[idx].status;
+    const assignedTime = formatPeruDateTime(false);
     cache[idx].asignadoA = asignadoA;
     cache[idx].assignedTechnician = asignadoA;
+    if (assignmentNote) {
+      cache[idx].assignmentNote = assignmentNote;
+    }
+    cache[idx].assignedBy = user.nombre;
+    cache[idx].assignedAt = assignedTime;
     if (prevStatus === 'open') {
       cache[idx].status = 'in_progress';
     }
@@ -207,12 +214,13 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       {
         id: `c-assign-${Date.now()}`,
         author: user.nombre,
-        role: 'Coordinador / Admin',
-        text:
-          prevStatus === 'open'
-            ? `Ticket asignado al técnico: ${asignadoA}. Estado actualizado automáticamente a "En Progreso".`
-            : `Ticket asignado al técnico: ${asignadoA}.`,
-        timestamp: formatPeruDateTime(false),
+        role: 'Administrador',
+        text: assignmentNote
+          ? `Ticket asignado a ${asignadoA}. Indicaciones del administrador: ${assignmentNote}`
+          : prevStatus === 'open'
+          ? `Ticket asignado al técnico: ${asignadoA}. Estado actualizado automáticamente a "En Progreso".`
+          : `Ticket asignado al técnico: ${asignadoA}.`,
+        timestamp: assignedTime,
       },
     ];
     saveCachedTickets(cache);

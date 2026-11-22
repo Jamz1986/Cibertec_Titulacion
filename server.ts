@@ -13,6 +13,7 @@ import {
   getAuthStatus,
   getPublicTechnicians,
   listUsersForAdmin,
+  registerSelfServiceUser,
   UserRole,
   verifyBearerToken,
 } from './api/_auth.js';
@@ -87,6 +88,9 @@ interface StoredWebhookTicket {
   ubicacion?: string;
   asignadoA?: string;
   assignedTechnician?: string;
+  assignmentNote?: string;
+  assignedBy?: string;
+  assignedAt?: string;
   acknowledgedBy?: string;
   acknowledgedAt?: string;
   duplicateAlertCount?: number;
@@ -873,6 +877,15 @@ app.post('/api/auth/bootstrap', (req, res) => {
   return res.status(result.success ? 200 : 400).json(result);
 });
 
+app.post('/api/auth/register', (req, res) => {
+  const result = registerSelfServiceUser({
+    username: req.body?.username || req.body?.identifier || '',
+    rol: req.body?.rol as UserRole,
+    password: req.body?.password || '',
+  });
+  return res.status(result.status || (result.success ? 200 : 400)).json(result);
+});
+
 app.post('/api/auth/login', (req, res) => {
   const result = authenticateUser(
     req.body?.identifier || req.body?.username || '',
@@ -1036,6 +1049,7 @@ app.patch('/api/tickets/:id/assign', (req, res) => {
   }
 
   const asignadoA = String(req.body?.asignadoA || '').trim();
+  const assignmentNote = String(req.body?.assignmentNote || '').trim();
   if (!asignadoA) {
     return res.status(400).json({ success: false, error: 'Debe indicar el técnico asignado.' });
   }
@@ -1059,6 +1073,11 @@ app.patch('/api/tickets/:id/assign', (req, res) => {
   const prevStatus = cache[idx].status;
   cache[idx].asignadoA = asignadoA;
   cache[idx].assignedTechnician = asignadoA;
+  if (assignmentNote) {
+    cache[idx].assignmentNote = assignmentNote;
+  }
+  cache[idx].assignedBy = user.nombre;
+  cache[idx].assignedAt = timeStr;
   if (prevStatus === 'open') {
     cache[idx].status = 'in_progress';
   }
@@ -1067,11 +1086,12 @@ app.patch('/api/tickets/:id/assign', (req, res) => {
     {
       id: `c-assign-${Date.now()}`,
       author: user.nombre,
-      role: 'Coordinador / Admin',
-      text:
-        prevStatus === 'open'
-          ? `Ticket asignado al técnico: ${asignadoA}. Estado actualizado automáticamente a "En Progreso".`
-          : `Ticket asignado al técnico: ${asignadoA}.`,
+      role: 'Administrador',
+      text: assignmentNote
+        ? `Ticket asignado a ${asignadoA}. Indicaciones del administrador: ${assignmentNote}`
+        : prevStatus === 'open'
+        ? `Ticket asignado al técnico: ${asignadoA}. Estado actualizado automáticamente a "En Progreso".`
+        : `Ticket asignado al técnico: ${asignadoA}.`,
       timestamp: timeStr,
     },
   ];

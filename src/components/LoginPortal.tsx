@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { UserRole } from '../types/helpdesk';
 import {
   Server,
   ShieldCheck,
@@ -15,10 +16,13 @@ import {
   Network,
   UserPlus,
   Loader2,
+  Users,
 } from 'lucide-react';
 
 export const LoginPortal: React.FC = () => {
-  const { login, claimInitialAdmin, needsSetup, isAuthLoading } = useAuth();
+  const { login, registerUser, claimInitialAdmin, needsSetup, isAuthLoading } = useAuth();
+  const [authMode, setAuthMode] = useState<'login' | 'register'>('login');
+  const [selectedRole, setSelectedRole] = useState<UserRole>('TECNICO');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
@@ -34,6 +38,12 @@ export const LoginPortal: React.FC = () => {
       const result = needsSetup
         ? await claimInitialAdmin({
             username: identifier,
+            password,
+          })
+        : authMode === 'register'
+        ? await registerUser({
+            username: identifier,
+            rol: selectedRole,
             password,
           })
         : await login(identifier, password);
@@ -135,21 +145,63 @@ export const LoginPortal: React.FC = () => {
               {/* Box Header */}
               <div className="flex items-center gap-3 pb-4 border-b border-slate-800">
                 <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-600/30 shrink-0">
-                  {needsSetup ? <UserPlus className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
+                  {needsSetup || authMode === 'register' ? (
+                    <UserPlus className="w-5 h-5" />
+                  ) : (
+                    <Lock className="w-5 h-5" />
+                  )}
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-white">
                     {needsSetup
                       ? 'Configuración Inicial de Administrador'
+                      : authMode === 'register'
+                      ? 'Crear Acceso por Perfil'
                       : 'Acceso al Sistema de Mesa de Ayuda'}
                   </h2>
                   <p className="text-xs text-slate-400">
                     {needsSetup
-                      ? 'Registre la cuenta coordinadora inicial o defina variables de entorno'
-                      : 'Ingrese su usuario y contraseña institucional'}
+                      ? 'Ingrese el usuario y clave inicial para administrar EduDesk'
+                      : authMode === 'register'
+                      ? 'Registre su usuario para Técnico, Docente o Alumno'
+                      : 'Ingrese su usuario o correo y contraseña'}
                   </p>
                 </div>
               </div>
+
+              {/* Simple mode switcher when system is already initialized */}
+              {!isAuthLoading && !needsSetup && (
+                <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('login');
+                      setLoginError(null);
+                    }}
+                    className={`py-2 px-3 rounded-lg transition-colors cursor-pointer ${
+                      authMode === 'login'
+                        ? 'bg-indigo-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Iniciar Sesión
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAuthMode('register');
+                      setLoginError(null);
+                    }}
+                    className={`py-2 px-3 rounded-lg transition-colors cursor-pointer ${
+                      authMode === 'register'
+                        ? 'bg-emerald-600 text-white shadow-xs'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Crear Perfil / Cuenta
+                  </button>
+                </div>
+              )}
 
               {isAuthLoading ? (
                 <div className="py-10 flex flex-col items-center justify-center gap-3 text-slate-400 text-xs">
@@ -158,16 +210,30 @@ export const LoginPortal: React.FC = () => {
                 </div>
               ) : (
                 <form onSubmit={handleSubmit} className="space-y-4">
-                  {needsSetup && (
-                    <div className="p-3 rounded-xl bg-indigo-950/60 border border-indigo-800/60 text-indigo-200 text-[11px] leading-relaxed">
-                      No se detectaron variables de entorno de usuarios activas. Puede crear ahora la cuenta inicial de <strong>Administrador / Coordinador</strong> o configurar <code className="font-mono text-indigo-300">AUTH_ADMIN_USER</code> / <code className="font-mono text-indigo-300">AUTH_USERS_JSON</code> en el servidor.
-                    </div>
-                  )}
-
                   {loginError && (
                     <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs flex items-center gap-2">
                       <Info className="w-4 h-4 shrink-0" />
                       <span>{loginError}</span>
+                    </div>
+                  )}
+
+                  {!needsSetup && authMode === 'register' && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Perfil del Usuario
+                      </label>
+                      <div className="relative">
+                        <Users className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                        <select
+                          value={selectedRole}
+                          onChange={(e) => setSelectedRole(e.target.value as UserRole)}
+                          className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white focus:outline-hidden transition-colors cursor-pointer"
+                        >
+                          <option value="TECNICO">Técnico de Soporte TI (TECNICO)</option>
+                          <option value="DOCENTE">Docente de Aula / AIP (DOCENTE)</option>
+                          <option value="ALUMNO">Estudiante de Laboratorio (ALUMNO)</option>
+                        </select>
+                      </div>
                     </div>
                   )}
 
@@ -190,7 +256,11 @@ export const LoginPortal: React.FC = () => {
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      {needsSetup ? 'Contraseña Inicial (mín. 6 caracteres)' : 'Contraseña'}
+                      {needsSetup
+                        ? 'Contraseña Inicial (mín. 6 caracteres)'
+                        : authMode === 'register'
+                        ? 'Contraseña Nueva (mín. 4 caracteres)'
+                        : 'Contraseña'}
                     </label>
                     <div className="relative">
                       <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
@@ -215,7 +285,11 @@ export const LoginPortal: React.FC = () => {
                   <button
                     type="submit"
                     disabled={isSubmitting}
-                    className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold text-xs transition-all shadow-md shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer mt-2"
+                    className={`w-full py-3 px-4 rounded-xl ${
+                      authMode === 'register' && !needsSetup
+                        ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
+                        : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30'
+                    } disabled:opacity-60 text-white font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer mt-2`}
                   >
                     {isSubmitting ? (
                       <>
@@ -225,7 +299,11 @@ export const LoginPortal: React.FC = () => {
                     ) : (
                       <>
                         <span>
-                          {needsSetup ? 'Crear Administrador e Ingresar' : 'Iniciar Sesión en EduDesk'}
+                          {needsSetup
+                            ? 'Crear Administrador e Ingresar'
+                            : authMode === 'register'
+                            ? 'Crear Cuenta e Ingresar'
+                            : 'Iniciar Sesión en EduDesk'}
                         </span>
                         <ArrowRight className="w-4 h-4" />
                       </>

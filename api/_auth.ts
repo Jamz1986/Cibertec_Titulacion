@@ -23,12 +23,60 @@ interface StoredAccount extends PublicUser {
 }
 
 const BOOTSTRAP_FILE = path.join('/tmp', 'edudesk_bootstrap_auth.json');
+const SESSION_KEY_FILE = path.join('/tmp', 'edudesk_session_secret.key');
 
-// Ephemeral in-memory HMAC signing fallback if AUTH_SESSION_SECRET is not set in env
-const SESSION_SECRET =
-  process.env.AUTH_SESSION_SECRET && process.env.AUTH_SESSION_SECRET.trim()
-    ? process.env.AUTH_SESSION_SECRET.trim()
-    : crypto.randomBytes(32).toString('hex');
+let cachedSessionSecret: string | null = null;
+
+function resolveSessionSecret(): string {
+  if (cachedSessionSecret) return cachedSessionSecret;
+
+  const explicit = process.env.AUTH_SESSION_SECRET?.trim();
+  if (explicit && !isPlaceholder(explicit)) {
+    cachedSessionSecret = explicit;
+    return cachedSessionSecret;
+  }
+
+  // Derive consistent secret across Vercel Serverless Functions from server-only/deployment env vars
+  const envMaterial = [
+    process.env.AUTH_USERS_JSON,
+    process.env.AUTH_ADMIN_PASSWORD,
+    process.env.AUTH_TECNICO_PASSWORD,
+    process.env.AUTH_DOCENTE_PASSWORD,
+    process.env.AUTH_ALUMNO_PASSWORD,
+    process.env.GEMINI_API_KEY,
+    process.env.VERCEL_DEPLOYMENT_ID,
+    process.env.VERCEL_PROJECT_ID,
+    process.env.VERCEL_ORG_ID,
+  ]
+    .filter((v) => v && !isPlaceholder(v))
+    .join('|');
+
+  if (envMaterial) {
+    cachedSessionSecret = crypto
+      .createHmac('sha256', 'edudesk-session-kdf-v1')
+      .update(envMaterial)
+      .digest('hex');
+    return cachedSessionSecret;
+  }
+
+  // Single-host / local fallback persisted in /tmp across processes
+  try {
+    if (fs.existsSync(SESSION_KEY_FILE)) {
+      const existing = fs.readFileSync(SESSION_KEY_FILE, 'utf-8').trim();
+      if (existing.length >= 32) {
+        cachedSessionSecret = existing;
+        return cachedSessionSecret;
+      }
+    }
+    const generated = crypto.randomBytes(32).toString('hex');
+    fs.writeFileSync(SESSION_KEY_FILE, generated, 'utf-8');
+    cachedSessionSecret = generated;
+    return cachedSessionSecret;
+  } catch {
+    cachedSessionSecret = crypto.randomBytes(32).toString('hex');
+    return cachedSessionSecret;
+  }
+}
 
 function isPlaceholder(val?: string): boolean {
   if (!val) return true;
@@ -344,6 +392,78 @@ export function claimInitialAdmin(input: {
   };
 }
 
+export function registerSelfServiceUser(input: {
+  username: string;
+  rol: UserRole;
+  password: string;
+}): { success: boolean; status?: number; error?: string; user?: PublicUser; token?: string } {
+  const username = String(input.username || '').trim();
+  const password = String(input.password || '').trim();
+  const rol = String(input.rol || 'TECNICO').toUpperCase() as UserRole;
+
+  if (username.length < 3) {
+    return { success: false, status: 400, error: 'El usuario debe tener al menos 3 caracteres.' };
+  }
+  if (password.length < 4) {
+    return { success: false, status: 400, error: 'La contraseña debe tener al menos 4 caracteres.' };
+  }
+  if (!['ADMIN', 'TECNICO', 'DOCENTE', 'ALUMNO'].includes(rol)) {
+    return { success: false, status: 400, error: 'Perfil inválido.' };
+  }
+
+  const { accounts } = getAllActiveAccounts();
+  if (rol === 'ADMIN' && accounts.length > 0) {
+    return {
+      success: false,
+      status: 403,
+      error: 'Ya existe un administrador configurado. Para ingresar como ADMIN use Iniciar Sesión.',
+    };
+  }
+
+  const email = username.includes('@') ? username : `${username}@edudesk.edu.pe`;
+  const exists = accounts.some(
+    (a) =>
+      a.username.toLowerCase() === username.toLowerCase() ||
+      a.email.toLowerCase() === email.toLowerCase()
+  );
+  if (exists) {
+    return {
+      success: false,
+      status: 409,
+      error: 'Ese usuario ya está registrado. Ingrese desde la pestaña Iniciar Sesión.',
+    };
+  }
+
+  const meta = defaultRoleMeta(rol);
+  const { salt, hash } = hashPassword(password);
+  const newAccount: StoredAccount = {
+    id: `usr-${rol.toLowerCase()}-${Date.now()}`,
+    username,
+    email,
+    nombre: username,
+    rol,
+    rolLabel: meta.rolLabel,
+    institucionSede: meta.institucionSede,
+    ugel: 'Mesa de Ayuda',
+    departamento: meta.departamento,
+    cargo: meta.cargo,
+    salt,
+    passwordHash: hash,
+  };
+
+  const currentRuntime = loadBootstrapAccounts();
+  currentRuntime.push(newAccount);
+  saveBootstrapAccounts(currentRuntime);
+
+  const publicUser = toPublicUser(newAccount);
+  return {
+    success: true,
+    status: 200,
+    user: publicUser,
+    token: signBearerToken(publicUser),
+  };
+}
+
 export function authenticateUser(
   identifier: string,
   password: string
@@ -405,7 +525,7 @@ export function signBearerToken(user: PublicUser): string {
     exp: Date.now() + 12 * 60 * 60 * 1000, // 12 hours
   };
   const encoded = Buffer.from(JSON.stringify(payload), 'utf-8').toString('base64url');
-  const sig = crypto.createHmac('sha256', SESSION_SECRET).update(encoded).digest('base64url');
+  const sig = crypto.createHmac('sha256', resolveSessionSecret()).update(encoded).digest('base64url');
   return `${encoded}.${sig}`;
 }
 
@@ -419,7 +539,7 @@ export function verifyBearerToken(authHeader?: string): PublicUser | null {
   const sig = token.slice(dotIdx + 1);
   if (!encoded || !sig) return null;
 
-  const expectedSig = crypto.createHmac('sha256', SESSION_SECRET).update(encoded).digest('base64url');
+  const expectedSig = crypto.createHmac('sha256', resolveSessionSecret()).update(encoded).digest('base64url');
   const sigBuf = Buffer.from(sig);
   const expectedBuf = Buffer.from(expectedSig);
   if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {

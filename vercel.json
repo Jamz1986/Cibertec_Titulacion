@@ -14,6 +14,10 @@
       "destination": "/api/auth?action=login"
     },
     {
+      "source": "/api/auth/register",
+      "destination": "/api/auth?action=register"
+    },
+    {
       "source": "/api/auth/me",
       "destination": "/api/auth?action=me"
     },

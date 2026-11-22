@@ -93,7 +93,7 @@ export default function App() {
     isTechOrAdminRef.current = isTechOrAdmin;
   }, [isTechOrAdmin]);
 
-  // Audio chime for real-time alert reception (CU-06)
+  // Audio chime for real-time alert reception
   const playAlertChimeOnce = () => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
@@ -187,7 +187,7 @@ export default function App() {
   const [isNewTicketModalOpen, setIsNewTicketModalOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
-  // Filters (CU-04 + CU-07)
+  // Filters
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | TicketStatus>('all');
@@ -205,7 +205,7 @@ export default function App() {
   }, [serverTechnicians, tickets]);
 
   const assignedToMeCount = useMemo(() => {
-    if (!currentUser || !isTechOrAdmin) return 0;
+    if (!currentUser || !isTechnician) return 0;
     const norm = (v?: string) => (v || '').trim().toLowerCase();
     const myName = norm(currentUser.nombre);
     if (!myName) return 0;
@@ -214,12 +214,15 @@ export default function App() {
       if (!assigned) return false;
       return assigned === myName || assigned.includes(myName) || myName.includes(assigned);
     }).length;
-  }, [tickets, currentUser, isTechOrAdmin]);
+  }, [tickets, currentUser, isTechnician]);
 
   // When switching role, align default view, alert state, and filtering
   React.useEffect(() => {
     setOnlyMyTickets(isGeneralUser);
     if (!isAdmin && activeSection === 'monitoring-rules') {
+      setActiveSection('tickets');
+    }
+    if (!isTechnician && activeSection === 'assigned') {
       setActiveSection('tickets');
     }
     if (!isTechOrAdmin) {
@@ -256,16 +259,20 @@ export default function App() {
               match.comments.length !== t.comments.length ||
               (match.duplicateAlertCount || 0) !== (t.duplicateAlertCount || 0) ||
               match.acknowledgedBy !== t.acknowledgedBy ||
-              match.asignadoA !== t.asignadoA)
+              match.asignadoA !== t.asignadoA ||
+              match.assignmentNote !== t.assignmentNote)
           ) {
             hasUpdates = true;
-            // Preserve local acknowledgment if server copy hasn't recorded it yet
+            // Preserve local acknowledgment and assignment note if server copy hasn't recorded it yet
             const mergedMatch: Ticket = {
               ...match,
               acknowledgedBy: match.acknowledgedBy || t.acknowledgedBy,
               acknowledgedAt: match.acknowledgedAt || t.acknowledgedAt,
               asignadoA: match.asignadoA || t.asignadoA,
               assignedTechnician: match.assignedTechnician || t.assignedTechnician,
+              assignmentNote: match.assignmentNote || t.assignmentNote,
+              assignedBy: match.assignedBy || t.assignedBy,
+              assignedAt: match.assignedAt || t.assignedAt,
             };
             setLatestZabbixAlert((curr) => (curr && curr.id === mergedMatch.id ? mergedMatch : curr));
             return mergedMatch;
@@ -274,7 +281,7 @@ export default function App() {
         });
 
         if (newTickets.length > 0) {
-          // CU-06: Solo alertar con sonido + banner si hay sesión de TECNICO o ADMIN y nunca repetir el mismo ticket
+          // Solo alertar con sonido + banner si hay sesión de TECNICO o ADMIN y nunca repetir el mismo ticket
           if (isTechOrAdminRef.current) {
             const alertCandidate = newTickets.find(
               (t) =>
@@ -749,7 +756,7 @@ export default function App() {
             </span>
           </button>
 
-          {(isAdmin || isTechnician) && (
+          {isTechnician && (
             <button
               onClick={() => {
                 setActiveSection('assigned');
@@ -1380,7 +1387,7 @@ export default function App() {
                     </select>
                   </div>
 
-                  {/* Assigned Technician Filter (CU-07) */}
+                  {/* Assigned Technician Filter */}
                   <div className="flex items-center gap-1.5">
                     <span className="text-slate-500 font-medium">Asignado:</span>
                     <select
@@ -1595,8 +1602,8 @@ export default function App() {
             </div>
           )}
 
-          {/* Section: Mis Tickets Asignados (TECNICO y ADMIN) */}
-          {activeSection === 'assigned' && (isAdmin || isTechnician) && currentUser && (
+          {/* Section: Mis Tickets Asignados (exclusivo para TECNICO) */}
+          {activeSection === 'assigned' && isTechnician && currentUser && (
             <AssignedTicketsView
               currentUserName={currentUser.nombre}
               tickets={tickets}
@@ -1605,7 +1612,7 @@ export default function App() {
             />
           )}
 
-          {/* Section: CU-10 Red y Equipos (solo ADMIN y TECNICO) */}
+          {/* Section: Red y Equipos (solo ADMIN y TECNICO) */}
           {activeSection === 'hosts' && (isAdmin || isTechnician) && (
             <HostMonitorView
               token={token}

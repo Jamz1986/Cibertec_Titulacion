@@ -21,6 +21,7 @@ interface AuthContextType {
   configuredByEnv: boolean;
   isAuthLoading: boolean;
   login: (identifier: string, password: string) => Promise<AuthActionResult>;
+  registerUser: (input: { username: string; rol: UserRole; password: string }) => Promise<AuthActionResult>;
   claimInitialAdmin: (input: ClaimAdminInput) => Promise<AuthActionResult>;
   logout: () => void;
   hasRole: (roles: UserRole[]) => boolean;
@@ -120,6 +121,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const registerUser = async (input: {
+    username: string;
+    rol: UserRole;
+    password: string;
+  }): Promise<AuthActionResult> => {
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.user || !data.token) {
+        return {
+          success: false,
+          error: data.error || 'No se pudo registrar el usuario.',
+        };
+      }
+      setCurrentUser(data.user);
+      setToken(data.token);
+      setNeedsSetup(false);
+      return { success: true };
+    } catch {
+      return {
+        success: false,
+        error: 'Error de red al registrar la cuenta.',
+      };
+    }
+  };
+
   const logout = () => {
     setCurrentUser(null);
     setToken(null);
@@ -140,6 +171,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         configuredByEnv,
         isAuthLoading,
         login,
+        registerUser,
         claimInitialAdmin,
         logout,
         hasRole,

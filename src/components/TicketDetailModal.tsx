@@ -57,6 +57,10 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
   const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
   const [serverTechnicians, setServerTechnicians] = useState<string[]>([]);
   const [assignmentConfirmedTo, setAssignmentConfirmedTo] = useState<string | null>(null);
+  const [isAssignWindowOpen, setIsAssignWindowOpen] = useState(false);
+  const [pendingTech, setPendingTech] = useState<string>('');
+  const [assignmentNoteInput, setAssignmentNoteInput] = useState<string>('');
+  const [assignFormError, setAssignFormError] = useState<string | null>(null);
 
   useEffect(() => {
     setCommentAuthor(currentUser?.nombre || 'Especialista TI');
@@ -66,6 +70,8 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
     setResolutionNote(ticket?.resolutionNotes || '');
     setShowPriorityEditor(false);
     setAssignmentConfirmedTo(null);
+    setIsAssignWindowOpen(false);
+    setAssignFormError(null);
   }, [ticket?.id, ticket?.resolutionNotes]);
 
   useEffect(() => {
@@ -166,10 +172,20 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
     onUpdateTicket(updated);
   };
 
-  const handleAssignTechnician = async (newTech: string) => {
+  const openAssignWindow = (preselectedTech?: string) => {
+    const initialTech =
+      typeof preselectedTech === 'string'
+        ? preselectedTech
+        : ticket.asignadoA || ticket.assignedTechnician || mergedTechnicians[0] || '';
+    setPendingTech(initialTech);
+    setAssignmentNoteInput(ticket.assignmentNote || '');
+    setAssignFormError(null);
+    setIsAssignWindowOpen(true);
+  };
+
+  const handleAssignTechnician = async (newTech: string, noteSummary: string) => {
     const cleanTech = newTech.trim();
-    const currentAssigned = ticket.asignadoA || ticket.assignedTechnician || '';
-    if (cleanTech === currentAssigned) return;
+    const cleanNote = noteSummary.trim();
 
     const formatter = new Intl.DateTimeFormat('es-PE', {
       timeZone: 'America/Lima',
@@ -181,20 +197,26 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
     const timestamp = `${formatter.format(new Date())} (GMT-5)`;
     const shouldMoveToInProgress = Boolean(cleanTech) && ticket.status === 'open';
     const nextStatus: TicketStatus = shouldMoveToInProgress ? 'in_progress' : ticket.status;
+    const assignedByName = currentUser?.nombre || 'Administrador';
 
     const updated: Ticket = {
       ...ticket,
       status: nextStatus,
       asignadoA: cleanTech || undefined,
       assignedTechnician: cleanTech || undefined,
+      assignmentNote: cleanTech ? cleanNote || undefined : undefined,
+      assignedBy: cleanTech ? assignedByName : undefined,
+      assignedAt: cleanTech ? timestamp : undefined,
       comments: [
         ...ticket.comments,
         {
           id: `c-assign-${Date.now()}`,
-          author: currentUser?.nombre || 'Coordinador / Admin',
-          role: 'Coordinador / Admin',
+          author: assignedByName,
+          role: 'Administrador',
           text: cleanTech
-            ? shouldMoveToInProgress
+            ? cleanNote
+              ? `Ticket asignado a ${cleanTech}. Resumen e indicaciones: ${cleanNote}`
+              : shouldMoveToInProgress
               ? `Ticket asignado al técnico: ${cleanTech}. Estado actualizado automáticamente a "En Progreso".`
               : `Ticket asignado al técnico: ${cleanTech}.`
             : 'Asignación de técnico removida.',
@@ -204,6 +226,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
     };
     onUpdateTicket(updated);
     setAssignmentConfirmedTo(cleanTech || null);
+    setIsAssignWindowOpen(false);
 
     if (cleanTech && token) {
       try {
@@ -213,12 +236,25 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
             'Content-Type': 'application/json',
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ asignadoA: cleanTech }),
+          body: JSON.stringify({ asignadoA: cleanTech, assignmentNote: cleanNote }),
         });
       } catch {
         // Ignorar si el ticket existe únicamente en el estado local
       }
     }
+  };
+
+  const handleSubmitAssignModal = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!pendingTech.trim()) {
+      setAssignFormError('Seleccione el técnico responsable.');
+      return;
+    }
+    if (assignmentNoteInput.trim().length < 5) {
+      setAssignFormError('Redacte un breve resumen del problema e indicaciones para el técnico.');
+      return;
+    }
+    handleAssignTechnician(pendingTech, assignmentNoteInput);
   };
 
   const handleAddComment = (e: React.FormEvent) => {
@@ -349,23 +385,18 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
 
             <span className="text-slate-300 dark:text-slate-700">|</span>
 
-            {/* CU-07: Asignación de Técnico (solo Coordinador / ADMIN editable) */}
+            {/* Asignación de Técnico (solo Administrador editable) */}
             <div className="flex items-center gap-1.5">
               <UserCheck className="w-3.5 h-3.5 text-indigo-500" />
               <span className="text-slate-500 font-medium">Asignado a:</span>
               {isCoordinator ? (
-                <select
-                  value={ticket.asignadoA || ticket.assignedTechnician || ''}
-                  onChange={(e) => handleAssignTechnician(e.target.value)}
-                  className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium cursor-pointer"
+                <button
+                  type="button"
+                  onClick={() => openAssignWindow()}
+                  className="px-2.5 py-0.5 rounded border border-indigo-300 dark:border-indigo-700 bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-950/60 text-indigo-800 dark:text-indigo-200 font-semibold cursor-pointer transition-colors"
                 >
-                  <option value="">Sin asignar</option>
-                  {mergedTechnicians.map((techName) => (
-                    <option key={techName} value={techName}>
-                      {techName}
-                    </option>
-                  ))}
-                </select>
+                  {ticket.asignadoA || ticket.assignedTechnician || 'Asignar Técnico...'}
+                </button>
               ) : (
                 <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-semibold text-slate-800 dark:text-slate-200">
                   {ticket.asignadoA || ticket.assignedTechnician || 'Sin asignar'}
@@ -472,7 +503,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
         {/* Tab 1: Info */}
         {activeTab === 'info' && (
           <div className="p-6 space-y-6 max-h-[65vh] overflow-y-auto">
-            {/* Flujo Continuo de Asignación y Atención (Solo Coordinador / ADMIN) */}
+            {/* Flujo Continuo de Asignación y Atención (Solo Administrador) */}
             {isCoordinator && (
               <div className="p-4 rounded-2xl border-2 border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 dark:from-indigo-950/30 dark:via-slate-900 dark:to-slate-900 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
@@ -482,10 +513,10 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                     </div>
                     <div>
                       <h4 className="text-xs font-bold text-slate-900 dark:text-white">
-                        CU-07 · Asignación y Flujo Continuo de Atención
+                        Asignación y Flujo Continuo de Atención
                       </h4>
                       <p className="text-[11px] text-slate-500 dark:text-slate-400">
-                        Asigne un técnico responsable y continúe inmediatamente con el diagnóstico o resolución.
+                        Asigne un técnico con indicaciones resumidas del problema y continúe con la atención.
                       </p>
                     </div>
                   </div>
@@ -497,18 +528,18 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                 </div>
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                  <select
-                    value={ticket.asignadoA || ticket.assignedTechnician || ''}
-                    onChange={(e) => handleAssignTechnician(e.target.value)}
-                    className="flex-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-900 dark:text-white cursor-pointer"
+                  <button
+                    type="button"
+                    onClick={() => openAssignWindow()}
+                    className="flex-1 px-3.5 py-2 rounded-lg border-2 border-indigo-300 dark:border-indigo-700 bg-white dark:bg-slate-800 hover:bg-indigo-50 dark:hover:bg-indigo-950/50 text-xs font-bold text-indigo-700 dark:text-indigo-300 cursor-pointer inline-flex items-center justify-center gap-2 transition-colors"
                   >
-                    <option value="">-- Seleccionar Técnico TI --</option>
-                    {mergedTechnicians.map((techName) => (
-                      <option key={techName} value={techName}>
-                        {techName}
-                      </option>
-                    ))}
-                  </select>
+                    <UserCheck className="w-4 h-4" />
+                    <span>
+                      {ticket.asignadoA || ticket.assignedTechnician
+                        ? 'Reasignar / Editar Indicaciones para Técnico'
+                        : 'Asignar Técnico y Redactar Indicaciones'}
+                    </span>
+                  </button>
 
                   <div className="flex flex-wrap items-center gap-1.5">
                     <button
@@ -545,14 +576,36 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                     <span className="font-semibold flex items-center gap-1.5">
                       <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
                       <span>
-                        Asignación confirmada para <strong>{assignmentConfirmedTo}</strong> · Ticket activo en atención ({ticket.status === 'in_progress' ? 'En Progreso' : ticket.status}).
+                        Asignación e indicaciones enviadas a <strong>{assignmentConfirmedTo}</strong> · Ticket en atención ({ticket.status === 'in_progress' ? 'En Progreso' : ticket.status}).
                       </span>
                     </span>
                     <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-300">
-                      Registrado en historial
+                      Visible en su bandeja de asignados
                     </span>
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Indicaciones del Administrador (visibles para el técnico asignado y admin) */}
+            {ticket.assignmentNote && (
+              <div className="p-4 rounded-2xl border border-indigo-300 dark:border-indigo-800 bg-indigo-50/80 dark:bg-indigo-950/30 space-y-1.5">
+                <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <span className="font-bold text-indigo-950 dark:text-indigo-200 flex items-center gap-1.5">
+                    <UserCheck className="w-4 h-4 text-indigo-600" />
+                    <span>Resumen e Indicaciones del Administrador</span>
+                  </span>
+                  {(ticket.assignedBy || ticket.assignedAt) && (
+                    <span className="text-[11px] font-mono text-indigo-700 dark:text-indigo-300">
+                      {ticket.assignedBy ? `Por: ${ticket.assignedBy}` : ''}
+                      {ticket.assignedBy && ticket.assignedAt ? ' · ' : ''}
+                      {ticket.assignedAt || ''}
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-800 dark:text-slate-200 leading-relaxed whitespace-pre-wrap">
+                  {ticket.assignmentNote}
+                </p>
               </div>
             )}
 
@@ -580,7 +633,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
               </div>
             )}
 
-            {/* CU-06: Estado de aceptación de alerta automática */}
+            {/* Estado de aceptación de alerta automática */}
             {ticket.origen === 'AUTOMATICO' && (
               <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/30 flex flex-wrap items-center justify-between gap-2 text-xs">
                 <div className="flex items-center gap-2">
@@ -878,6 +931,97 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
         associatedTicket={ticket}
         onLogCallToTicket={handleLogCall}
       />
+
+      {/* Ventana de Asignación de Técnico con Resumen del Problema (Solo Administrador) */}
+      {isCoordinator && isAssignWindowOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-xs">
+          <div className="w-full max-w-lg bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden">
+            <div className="px-5 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-indigo-600 text-white flex items-center justify-center">
+                  <UserCheck className="w-4 h-4" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Asignar Ticket a Técnico TI
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    {ticket.code} · {ticket.title}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsAssignWindowOpen(false)}
+                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSubmitAssignModal} className="p-5 space-y-4 text-xs">
+              {assignFormError && (
+                <div className="p-2.5 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-[11px] font-medium">
+                  {assignFormError}
+                </div>
+              )}
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1.5">
+                  Técnico Responsable *
+                </label>
+                <select
+                  value={pendingTech}
+                  onChange={(e) => setPendingTech(e.target.value)}
+                  required
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold cursor-pointer"
+                >
+                  <option value="">-- Seleccionar Técnico --</option>
+                  {mergedTechnicians.map((techName) => (
+                    <option key={techName} value={techName}>
+                      {techName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 dark:text-slate-300 mb-1">
+                  Resumen del Problema e Indicaciones para el Técnico *
+                </label>
+                <p className="text-[11px] text-slate-500 mb-1.5">
+                  Redacte el diagnóstico inicial o pasos sugeridos. El técnico verá este mensaje al abrir su bandeja de tickets asignados.
+                </p>
+                <textarea
+                  rows={4}
+                  required
+                  value={assignmentNoteInput}
+                  onChange={(e) => setAssignmentNoteInput(e.target.value)}
+                  placeholder="Ej: Se detectó caída de conectividad en el laboratorio VLAN 30. Revisar el cable UTP del puesto PC-ALUMNO-01 y validar respuesta del agente Zabbix."
+                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white text-xs leading-relaxed focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
+                />
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2 border-t border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setIsAssignWindowOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-300 dark:border-slate-700 text-slate-700 dark:text-slate-300 font-semibold hover:bg-slate-100 dark:hover:bg-slate-800 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold shadow-xs cursor-pointer inline-flex items-center gap-1.5"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>Confirmar Asignación y Enviar</span>
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -6,6 +6,7 @@ import {
   getAuthStatus,
   getPublicTechnicians,
   listUsersForAdmin,
+  registerSelfServiceUser,
   UserRole,
   verifyBearerToken,
 } from './_auth.js';
@@ -79,6 +80,17 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       password: body.password,
     });
     return res.status(result.success ? 200 : 400).json(result);
+  }
+
+  // POST /api/auth/register (registro rápido por perfil sin escalación a ADMIN)
+  if (req.method === 'POST' && (url.includes('/register') || action === 'register')) {
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    const result = registerSelfServiceUser({
+      username: body.username || body.identifier || '',
+      rol: body.rol as UserRole,
+      password: body.password || '',
+    });
+    return res.status(result.status || (result.success ? 200 : 400)).json(result);
   }
 
   // POST /api/auth/login
