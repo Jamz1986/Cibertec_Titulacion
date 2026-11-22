@@ -55,8 +55,8 @@ El sistema integra:
 - **Paso 6:** Instalación del motor de Base de Datos MySQL 8.0 y creación del esquema para Zabbix y EduDesk:
   ```sql
   CREATE DATABASE edudesk_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-  CREATE USER 'edudesk_user'@'localhost' IDENTIFIED BY 'MinEdu2026$Secure';
-  GRANT ALL PRIVILEGES ON edudesk_db.* TO 'edudesk_user'@'localhost';
+  CREATE USER '<TU_USUARIO_MYSQL>'@'localhost' IDENTIFIED BY '<TU_CLAVE_MYSQL>';
+  GRANT ALL PRIVILEGES ON edudesk_db.* TO '<TU_USUARIO_MYSQL>'@'localhost';
   FLUSH PRIVILEGES;
   ```
 - **Paso 7:** Instalación y configuración de **Zabbix Server 7.0 LTS** con interfaz web en Nginx/Apache.
@@ -110,16 +110,20 @@ El sistema integra:
 
 ---
 
-## 5. Control de Acceso y Credenciales de los 4 Integrantes
+## 5. Control de Acceso y Variables de Entorno
 
-El sistema cuenta con autenticación por credenciales institucionales para los 4 miembros del Grupo 01 (CIBERTEC):
+El sistema autentica usuarios en el servidor mediante verificación criptográfica (`scrypt`) usando los roles: `ADMIN`, `TECNICO`, `DOCENTE` y `ALUMNO`.
 
-| Integrante | Especialidad | Usuario | Contraseña | Rol / Permisos |
-| :--- | :--- | :--- | :--- | :--- |
-| **Josealejandro Hinojosa Quispe** | Redes y Comunicaciones | `jhinojosa` | `hinojosa2026` | **ADMIN:** Jefe de Proyecto / SysAdmin NOC & Zabbix Server |
-| **Leonardo Granados Ortega** | Redes y Comunicaciones | `lgranados` | `granados2026` | **TECNICO:** Analista de Infraestructura TI & Sandbox VMware |
-| **Renzo Fonseca Vilchez** | Redes y Comunicaciones | `rfonseca` | `fonseca2026` | **ADMIN:** Analista de Redes Cisco / Packet Tracer (`TOPOLOGIA.pkt`) |
-| **Maria Gonzales Lozano** | Computación e Informática | `mgonzales` | `gonzales2026` | **TECNICO:** Analista de Desarrollo Software Java & BD MySQL |
+Por seguridad, no se almacenan usuarios ni contraseñas en el código fuente. Configura las credenciales mediante variables de entorno en tu servidor o panel de secretos (ver `.env.example`):
+
+| Rol | Variable de Usuario | Variable de Contraseña | Permisos |
+| :--- | :--- | :--- | :--- |
+| **ADMIN** | `AUTH_ADMIN_USER` (`<TU_USUARIO>`) | `AUTH_ADMIN_PASSWORD` (`<TU_CLAVE>`) | Gestión total, asignación de técnicos (CU-07), monitoreo de red y equipos (CU-10) |
+| **TECNICO** | `AUTH_TECNICO_USER` (`<TU_USUARIO>`) | `AUTH_TECNICO_PASSWORD` (`<TU_CLAVE>`) | Alertas en vivo (CU-06), diagnóstico y monitoreo de red y equipos (CU-10) |
+| **DOCENTE** | `AUTH_DOCENTE_USER` (`<TU_USUARIO>`) | `AUTH_DOCENTE_PASSWORD` (`<TU_CLAVE>`) | Registro y seguimiento de incidencias escolares |
+| **ALUMNO** | `AUTH_ALUMNO_USER` (`<TU_USUARIO>`) | `AUTH_ALUMNO_PASSWORD` (`<TU_CLAVE>`) | Reporte y consulta de incidencias asignadas |
+
+También puedes definir múltiples cuentas en formato JSON usando `AUTH_USERS_JSON`. Si aún no se han configurado variables de entorno, la pantalla de inicio permite registrar la cuenta administradora inicial en el primer ingreso.
 
 ---
 

@@ -13,22 +13,38 @@ import {
   EyeOff,
   Info,
   Network,
+  UserPlus,
+  Loader2,
 } from 'lucide-react';
 
 export const LoginPortal: React.FC = () => {
-  const { login } = useAuth();
+  const { login, claimInitialAdmin, needsSetup, isAuthLoading } = useAuth();
   const [identifier, setIdentifier] = useState('');
+  const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError(null);
+    setIsSubmitting(true);
 
-    const result = login(identifier, password);
-    if (!result.success) {
-      setLoginError(result.error || 'Credenciales inválidas.');
+    try {
+      const result = needsSetup
+        ? await claimInitialAdmin({
+            username: identifier,
+            nombre: fullName || identifier,
+            password,
+          })
+        : await login(identifier, password);
+
+      if (!result.success) {
+        setLoginError(result.error || 'Credenciales inválidas.');
+      }
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -69,7 +85,6 @@ export const LoginPortal: React.FC = () => {
       {/* Main Container */}
       <main className="relative z-10 flex-1 max-w-7xl w-full mx-auto p-6 md:p-10 flex flex-col justify-center">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
-          
           {/* Left Column: Thesis Context & Scope */}
           <div className="lg:col-span-7 space-y-6">
             <div className="space-y-3">
@@ -77,11 +92,11 @@ export const LoginPortal: React.FC = () => {
                 <Server className="w-3.5 h-3.5 text-indigo-400" />
                 <span>IEST Privado CIBERTEC · Diplomado de Titulación 2026</span>
               </div>
-              
+
               <h1 className="text-3xl md:text-4xl font-extrabold tracking-tight text-white leading-tight">
                 Plataforma de Monitoreo de Red, Gestión Predictiva y Automatizada de Incidencias
               </h1>
-              
+
               <p className="text-sm md:text-base text-slate-400 leading-relaxed">
                 Sistema institucional para las Instituciones Educativas de la <strong>Red Escolar</strong> (San Borja, Miraflores, Santiago de Surco, Barranco, Chorrillos, Surquillo y San Luis).
                 Optimiza la supervisión continua de la conectividad en Aulas de Innovación Pedagógica (AIP), la atención oportuna de incidencias técnicas y el cumplimiento riguroso de tiempos de respuesta según criticidad.
@@ -119,92 +134,132 @@ export const LoginPortal: React.FC = () => {
           {/* Right Column: Secure Institutional Authentication Card */}
           <div className="lg:col-span-5">
             <div className="bg-slate-900/90 border border-slate-800 rounded-2xl shadow-2xl p-6 md:p-7 backdrop-blur-xl relative space-y-5">
-              
               {/* Box Header */}
               <div className="flex items-center gap-3 pb-4 border-b border-slate-800">
                 <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-600/30 shrink-0">
-                  <Lock className="w-5 h-5" />
+                  {needsSetup ? <UserPlus className="w-5 h-5" /> : <Lock className="w-5 h-5" />}
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-white">
-                    Acceso al Sistema de Mesa de Ayuda
+                    {needsSetup
+                      ? 'Configuración Inicial de Administrador'
+                      : 'Acceso al Sistema de Mesa de Ayuda'}
                   </h2>
                   <p className="text-xs text-slate-400">
-                    Ingrese su usuario y contraseña institucional
+                    {needsSetup
+                      ? 'Registre la cuenta coordinadora inicial o defina variables de entorno'
+                      : 'Ingrese su usuario y contraseña institucional'}
                   </p>
                 </div>
               </div>
 
-              {/* Login Form */}
-              <form onSubmit={handleSubmit} className="space-y-4">
-                {loginError && (
-                  <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs flex items-center gap-2">
-                    <Info className="w-4 h-4 shrink-0" />
-                    <span>{loginError}</span>
-                  </div>
-                )}
-
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Usuario o Correo Institucional
-                  </label>
-                  <div className="relative">
-                    <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
-                    <input
-                      type="text"
-                      value={identifier}
-                      onChange={(e) => setIdentifier(e.target.value)}
-                      placeholder="usuario@cibertec.edu.pe"
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-hidden transition-colors"
-                      required
-                    />
-                  </div>
+              {isAuthLoading ? (
+                <div className="py-10 flex flex-col items-center justify-center gap-3 text-slate-400 text-xs">
+                  <Loader2 className="w-6 h-6 animate-spin text-indigo-400" />
+                  <span>Verificando estado de autenticación...</span>
                 </div>
+              ) : (
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  {needsSetup && (
+                    <div className="p-3 rounded-xl bg-indigo-950/60 border border-indigo-800/60 text-indigo-200 text-[11px] leading-relaxed">
+                      No se detectaron variables de entorno de usuarios activas. Puede crear ahora la cuenta inicial de <strong>Administrador / Coordinador</strong> o configurar <code className="font-mono text-indigo-300">AUTH_ADMIN_USER</code> / <code className="font-mono text-indigo-300">AUTH_USERS_JSON</code> en el servidor.
+                    </div>
+                  )}
 
-                <div>
-                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                    Contraseña
-                  </label>
-                  <div className="relative">
-                    <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
-                    <input
-                      type={showPassword ? 'text' : 'password'}
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      placeholder="••••••••••••"
-                      className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-9 pr-10 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-hidden font-mono transition-colors"
-                      required
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 cursor-pointer"
-                    >
-                      {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                    </button>
+                  {loginError && (
+                    <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs flex items-center gap-2">
+                      <Info className="w-4 h-4 shrink-0" />
+                      <span>{loginError}</span>
+                    </div>
+                  )}
+
+                  {needsSetup && (
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Nombre Completo (Coordinador / Admin)
+                      </label>
+                      <input
+                        type="text"
+                        value={fullName}
+                        onChange={(e) => setFullName(e.target.value)}
+                        placeholder="Ej. Coordinador TI"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-hidden transition-colors"
+                      />
+                    </div>
+                  )}
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Usuario o Correo Institucional
+                    </label>
+                    <div className="relative">
+                      <Mail className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={identifier}
+                        onChange={(e) => setIdentifier(e.target.value)}
+                        placeholder="usuario@edudesk.edu.pe"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-9 pr-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-hidden transition-colors"
+                        required
+                      />
+                    </div>
                   </div>
-                </div>
 
-                <button
-                  type="submit"
-                  className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs transition-all shadow-md shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer mt-2"
-                >
-                  <span>Iniciar Sesión en EduDesk</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              </form>
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      {needsSetup ? 'Contraseña Inicial (mín. 6 caracteres)' : 'Contraseña'}
+                    </label>
+                    <div className="relative">
+                      <KeyRound className="w-4 h-4 text-slate-500 absolute left-3 top-3 pointer-events-none" />
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        placeholder="••••••••••••"
+                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl pl-9 pr-10 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-hidden font-mono transition-colors"
+                        required
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute right-3 top-2.5 text-slate-500 hover:text-slate-300 cursor-pointer"
+                      >
+                        {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <button
+                    type="submit"
+                    disabled={isSubmitting}
+                    className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 text-white font-semibold text-xs transition-all shadow-md shadow-indigo-600/30 flex items-center justify-center gap-2 cursor-pointer mt-2"
+                  >
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Validando...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>
+                          {needsSetup ? 'Crear Administrador e Ingresar' : 'Iniciar Sesión en EduDesk'}
+                        </span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+                </form>
+              )}
 
               {/* Institutional Notice */}
               <div className="pt-2 text-[10px] text-slate-500 leading-normal flex items-start gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0 mt-0.5" />
                 <span>
-                  Autenticación auditada con control de acceso por roles (RBAC) conforme a las directivas de seguridad de DRELM y CIBERTEC.
+                  Autenticación verificada en servidor con control de acceso por roles (DOCENTE, ALUMNO, TECNICO, ADMIN).
                 </span>
               </div>
-
             </div>
           </div>
-
         </div>
       </main>
 

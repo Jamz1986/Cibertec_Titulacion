@@ -155,6 +155,15 @@ export interface Ticket {
   createdAt: string;
   slaTargetHours: number;
   assignedTechnician?: string;
+  asignadoA?: string;
+  acknowledgedBy?: string;
+  acknowledgedAt?: string;
+  duplicateAlertCount?: number;
+  metricsSnapshot?: {
+    cpu?: string | null;
+    ram?: string | null;
+    disco?: string | null;
+  };
   vmwareEnv?: VMwareEnvironment;
   vmwareTestResults?: VMwareTestResult[];
   resolutionNotes?: string;
@@ -180,4 +189,21 @@ export interface Ticket {
   valorActual?: string;
   tipoDispositivo?: string;
   ubicacion?: string;
+}
+
+export type HostDeviceType = 'switch' | 'servidor' | 'PC';
+export type HostHealthState = 'OK' | 'ADVERTENCIA' | 'CAIDO';
+
+export interface MonitoredHost {
+  nombre: string;
+  ip?: string;
+  tipo: HostDeviceType;
+  estado: HostHealthState;
+  ultimaLectura: string;
+  cpu: string | null;
+  ram: string | null;
+  disco: string | null;
+  ticketsAbiertos: number;
+  totalTickets: number;
+  tickets: Ticket[];
 }

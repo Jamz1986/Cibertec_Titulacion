@@ -1,6 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import fs from 'fs';
 import path from 'path';
+import { verifyBearerToken } from '../_auth';
+import { aggregateHostsFromWebhookTickets } from '../_hosts';
 
 const CACHE_FILE = path.join('/tmp', 'zabbix_tickets_cache.json');
 
@@ -23,6 +25,35 @@ function saveCachedTickets(tickets: any[]) {
   } catch (err) {
     console.warn('[Zabbix Webhook] Error writing cache file:', err);
   }
+}
+
+function formatPeruDateTime(includeDate = true): string {
+  const formatter = new Intl.DateTimeFormat('es-PE', {
+    timeZone: 'America/Lima',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(new Date());
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  if (!includeDate) {
+    return `${map.hour}:${map.minute}:${map.second} (GMT-5)`;
+  }
+  return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second} (GMT-5)`;
+}
+
+function setPublicWebhookCors(res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,POST');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version'
+  );
 }
 
 function mapZabbixSeverityToPriority(severity?: string): 'low' | 'medium' | 'high' | 'urgent' {
@@ -65,17 +96,99 @@ function mapZabbixSeverityToPriority(severity?: string): 'low' | 'medium' | 'hig
 }
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
-  // Set universal CORS headers
-  res.setHeader('Access-Control-Allow-Credentials', 'true');
-  res.setHeader('Access-Control-Allow-Origin', '*');
-  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS,PATCH,DELETE,POST,PUT');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'X-CSRF-Token, X-Requested-With, Accept, Accept-Version, Content-Length, Content-MD5, Content-Type, Date, X-Api-Version, Authorization'
-  );
+  const action = String(req.query?.action || '').trim();
+  const isAuthProtectedAction =
+    action === 'hosts' || action === 'acknowledge' || action === 'assign';
+
+  if (!isAuthProtectedAction) {
+    setPublicWebhookCors(res);
+  }
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
+  }
+
+  // CU-10: GET /api/hosts (solo ADMIN y TECNICO)
+  if (req.method === 'GET' && action === 'hosts') {
+    const user = verifyBearerToken(req.headers.authorization as string | undefined);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+    }
+    if (user.rol !== 'ADMIN' && user.rol !== 'TECNICO') {
+      return res.status(403).json({
+        success: false,
+        error: 'Acceso restringido a roles ADMIN o TECNICO.',
+      });
+    }
+    const hosts = aggregateHostsFromWebhookTickets(getCachedTickets());
+    return res.status(200).json({
+      success: true,
+      count: hosts.length,
+      hosts,
+    });
+  }
+
+  // CU-06: PATCH /api/tickets/:id/acknowledge (solo ADMIN y TECNICO)
+  if (req.method === 'PATCH' && action === 'acknowledge') {
+    const user = verifyBearerToken(req.headers.authorization as string | undefined);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+    }
+    if (user.rol !== 'ADMIN' && user.rol !== 'TECNICO') {
+      return res.status(403).json({
+        success: false,
+        error: 'Solo un técnico o administrador puede aceptar la alerta.',
+      });
+    }
+    const targetId = String(req.query?.id || '').trim();
+    const cache = getCachedTickets();
+    const idx = cache.findIndex((t) => t.id === targetId);
+    if (idx === -1) {
+      return res.status(404).json({ success: false, error: 'Ticket no encontrado en caché del servidor.' });
+    }
+    cache[idx].acknowledgedBy = user.nombre;
+    cache[idx].acknowledgedAt = formatPeruDateTime(true);
+    saveCachedTickets(cache);
+    return res.status(200).json({ success: true, ticket: cache[idx] });
+  }
+
+  // CU-07: PATCH /api/tickets/:id/assign (solo ADMIN / Coordinador)
+  if (req.method === 'PATCH' && action === 'assign') {
+    const user = verifyBearerToken(req.headers.authorization as string | undefined);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+    }
+    if (user.rol !== 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Solo el coordinador (ADMIN) puede asignar técnicos.',
+      });
+    }
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    const asignadoA = String(body?.asignadoA || '').trim();
+    if (!asignadoA) {
+      return res.status(400).json({ success: false, error: 'Debe indicar el técnico asignado.' });
+    }
+    const targetId = String(req.query?.id || '').trim();
+    const cache = getCachedTickets();
+    const idx = cache.findIndex((t) => t.id === targetId);
+    if (idx === -1) {
+      return res.status(404).json({ success: false, error: 'Ticket no encontrado en caché del servidor.' });
+    }
+    cache[idx].asignadoA = asignadoA;
+    cache[idx].assignedTechnician = asignadoA;
+    cache[idx].comments = [
+      ...(cache[idx].comments || []),
+      {
+        id: `c-assign-${Date.now()}`,
+        author: user.nombre,
+        role: 'Coordinador / Admin',
+        text: `Ticket asignado al técnico: ${asignadoA}.`,
+        timestamp: formatPeruDateTime(false),
+      },
+    ];
+    saveCachedTickets(cache);
+    return res.status(200).json({ success: true, ticket: cache[idx] });
   }
 
   if (req.method === 'GET') {
@@ -339,6 +452,29 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         existing.valorActual = itemValue;
         existing.horaIncidenciaVM = timeSync.timeOnly;
         existing.vmTimestamp = timeSync.vmTimestamp;
+        existing.duplicateAlertCount = (existing.duplicateAlertCount || 0) + 1;
+
+        const dupNorm = `${eventName} ${rawMensajeFalla}`.toLowerCase();
+        const nextSnap = { ...(existing.metricsSnapshot || {}) };
+        if (payload?.cpu !== undefined && payload?.cpu !== null && String(payload.cpu).trim() !== '') {
+          nextSnap.cpu = String(payload.cpu).trim();
+        } else if ((dupNorm.includes('cpu') || dupNorm.includes('procesador')) && itemValue !== 'N/A') {
+          nextSnap.cpu = itemValue;
+        }
+        if (payload?.ram !== undefined && payload?.ram !== null && String(payload.ram).trim() !== '') {
+          nextSnap.ram = String(payload.ram).trim();
+        } else if ((dupNorm.includes('ram') || dupNorm.includes('memoria') || dupNorm.includes('memory')) && itemValue !== 'N/A') {
+          nextSnap.ram = itemValue;
+        }
+        if ((payload?.disco ?? payload?.disk) !== undefined && String(payload?.disco ?? payload?.disk).trim() !== '') {
+          nextSnap.disco = String(payload?.disco ?? payload?.disk).trim();
+        } else if ((dupNorm.includes('disco') || dupNorm.includes('disk') || dupNorm.includes('filesystem') || dupNorm.includes('storage')) && itemValue !== 'N/A') {
+          nextSnap.disco = itemValue;
+        }
+        if (Object.keys(nextSnap).length > 0) {
+          existing.metricsSnapshot = nextSnap;
+        }
+
         saveCachedTickets(current);
         return res.status(200).json({
           status: 'success',
@@ -486,6 +622,29 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         valorActual: itemValue,
         tipoDispositivo,
         ubicacion: ubicacion || undefined,
+        duplicateAlertCount: 0,
+        metricsSnapshot: (() => {
+          const snap: { cpu?: string | null; ram?: string | null; disco?: string | null } = {};
+          if (payload?.cpu !== undefined && payload?.cpu !== null && String(payload.cpu).trim() !== '') {
+            snap.cpu = String(payload.cpu).trim();
+          } else if (casoNumero === 2 && itemValue !== 'N/A') {
+            snap.cpu = itemValue;
+          }
+          if (payload?.ram !== undefined && payload?.ram !== null && String(payload.ram).trim() !== '') {
+            snap.ram = String(payload.ram).trim();
+          } else if (casoNumero === 4 && itemValue !== 'N/A') {
+            snap.ram = itemValue;
+          }
+          if ((payload?.disco ?? payload?.disk) !== undefined && String(payload?.disco ?? payload?.disk).trim() !== '') {
+            snap.disco = String(payload?.disco ?? payload?.disk).trim();
+          } else if (
+            (normEvent.includes('disco') || normEvent.includes('disk') || normEvent.includes('filesystem') || normEvent.includes('storage')) &&
+            itemValue !== 'N/A'
+          ) {
+            snap.disco = itemValue;
+          }
+          return Object.keys(snap).length > 0 ? snap : undefined;
+        })(),
         sede: payload?.sede || `Sede Miraflores · ${hostName} (${hostIp})`,
         schoolName: payload?.schoolName || `I.E. Sede Miraflores (${hostName})`,
         reporterUserId: 'usr-zabbix-webhook',

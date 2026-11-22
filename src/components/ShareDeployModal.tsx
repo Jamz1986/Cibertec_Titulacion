@@ -6,18 +6,46 @@ import {
   Check,
   X,
   Users,
-  ShieldCheck,
   ExternalLink,
   KeyRound,
   Network,
-  Server
 } from 'lucide-react';
-import { TEAM_MEMBERS } from '../context/AuthContext';
 
 interface ShareDeployModalProps {
   isOpen: boolean;
   onClose: () => void;
 }
+
+const ROLE_ENV_CONFIGS = [
+  {
+    rol: 'ADMIN',
+    titulo: 'Administrador / Coordinador NOC',
+    permisos: 'Acceso total, monitoreo de red y equipos, y asignación de técnicos.',
+    userVar: 'AUTH_ADMIN_USER',
+    passVar: 'AUTH_ADMIN_PASSWORD',
+  },
+  {
+    rol: 'TECNICO',
+    titulo: 'Especialista de Soporte Técnico TI',
+    permisos: 'Alertas sonoras en tiempo real, aceptación de incidentes y monitoreo de equipos.',
+    userVar: 'AUTH_TECNICO_USER',
+    passVar: 'AUTH_TECNICO_PASSWORD',
+  },
+  {
+    rol: 'DOCENTE',
+    titulo: 'Docente de Aula / AIP',
+    permisos: 'Registro de tickets manuales y seguimiento de sus reportes.',
+    userVar: 'AUTH_DOCENTE_USER',
+    passVar: 'AUTH_DOCENTE_PASSWORD',
+  },
+  {
+    rol: 'ALUMNO',
+    titulo: 'Estudiante de Laboratorio',
+    permisos: 'Reporte de incidencias de aula y consulta de estado.',
+    userVar: 'AUTH_ALUMNO_USER',
+    passVar: 'AUTH_ALUMNO_PASSWORD',
+  },
+];
 
 export const ShareDeployModal: React.FC<ShareDeployModalProps> = ({ isOpen, onClose }) => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -38,7 +66,6 @@ export const ShareDeployModal: React.FC<ShareDeployModalProps> = ({ isOpen, onCl
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/70 backdrop-blur-xs overflow-y-auto">
       <div className="relative w-full max-w-3xl bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-2xl overflow-hidden my-6">
-        
         {/* Header */}
         <div className="px-6 py-4 border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -47,13 +74,13 @@ export const ShareDeployModal: React.FC<ShareDeployModalProps> = ({ isOpen, onCl
             </div>
             <div>
               <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
-                <span>Acceso Institucional & Credenciales del Equipo</span>
+                <span>Acceso Institucional & Roles del Sistema</span>
                 <span className="text-[10px] font-mono font-bold bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full">
                   GRUPO 01
                 </span>
               </h2>
               <p className="text-xs text-slate-500 dark:text-slate-400">
-                Credenciales de acceso para los 4 integrantes del proyecto de titulación CIBERTEC.
+                Enlace de despliegue y gestión de cuentas mediante variables de entorno del servidor.
               </p>
             </div>
           </div>
@@ -67,7 +94,6 @@ export const ShareDeployModal: React.FC<ShareDeployModalProps> = ({ isOpen, onCl
         </div>
 
         <div className="p-6 space-y-6 max-h-[80vh] overflow-y-auto text-xs">
-          
           {/* Section 1: Live Cloud URL */}
           <div className="p-4 rounded-xl border border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-br from-indigo-50/60 to-white dark:from-indigo-950/30 dark:to-slate-900 space-y-3">
             <div className="flex items-center justify-between">
@@ -114,66 +140,67 @@ export const ShareDeployModal: React.FC<ShareDeployModalProps> = ({ isOpen, onCl
             </div>
           </div>
 
-          {/* Section 2: Credenciales de los 4 Miembros */}
+          {/* Section 2: Roles & Env Configuration (No hardcoded secrets) */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="font-bold text-slate-900 dark:text-white uppercase tracking-wider text-xs flex items-center gap-2">
                 <Users className="w-4 h-4 text-indigo-600" />
-                <span>2. Credenciales de Acceso Oficiales (4 Miembros)</span>
+                <span>2. Roles del Sistema y Variables de Entorno</span>
               </span>
-              <span className="text-[11px] text-slate-500">
-                Ingreso protegido por contraseña
+              <span className="text-[11px] text-slate-500 flex items-center gap-1">
+                <KeyRound className="w-3.5 h-3.5 text-emerald-600" />
+                <span>Sin credenciales expuestas en código</span>
               </span>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {TEAM_MEMBERS.map((member) => (
+              {ROLE_ENV_CONFIGS.map((item) => (
                 <div
-                  key={member.id}
-                  className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 space-y-2.5"
+                  key={item.rol}
+                  className="p-4 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/60 dark:bg-slate-950/40 space-y-2"
                 >
                   <div className="flex items-center justify-between">
                     <span className="font-bold text-slate-900 dark:text-white text-xs">
-                      {member.nombre}
+                      {item.titulo}
                     </span>
                     <span
                       className={`text-[9px] font-bold px-2 py-0.5 rounded font-mono ${
-                        member.rol === 'ADMIN'
+                        item.rol === 'ADMIN'
                           ? 'bg-rose-100 text-rose-700 dark:bg-rose-950 dark:text-rose-300'
-                          : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                          : item.rol === 'TECNICO'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300'
+                          : 'bg-indigo-100 text-indigo-700 dark:bg-indigo-950 dark:text-indigo-300'
                       }`}
                     >
-                      {member.rol}
+                      {item.rol}
                     </span>
                   </div>
 
                   <p className="text-[11px] text-slate-600 dark:text-slate-400">
-                    {member.cargo}
+                    {item.permisos}
                   </p>
 
                   <div className="p-2.5 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 space-y-1 font-mono text-[11px]">
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Usuario:</span>
-                      <span className="text-slate-900 dark:text-slate-100 font-bold">
-                        {member.username}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-slate-500">{item.userVar}:</span>
+                      <span className="text-slate-800 dark:text-slate-200 font-semibold">
+                        &lt;TU_USUARIO&gt;
                       </span>
                     </div>
-                    <div className="flex items-center justify-between">
-                      <span className="text-slate-500">Correo:</span>
-                      <span className="text-slate-700 dark:text-slate-300">
-                        {member.email}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between pt-1 border-t border-slate-100 dark:border-slate-800">
-                      <span className="text-slate-500">Contraseña:</span>
-                      <span className="text-indigo-600 dark:text-indigo-400 font-bold select-all">
-                        {member.password}
+                    <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-100 dark:border-slate-800">
+                      <span className="text-slate-500">{item.passVar}:</span>
+                      <span className="text-indigo-600 dark:text-indigo-400 font-semibold">
+                        &lt;TU_CLAVE&gt;
                       </span>
                     </div>
                   </div>
                 </div>
               ))}
             </div>
+
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              Para múltiples cuentas simultáneas por equipo, configure <code className="font-mono text-slate-700 dark:text-slate-300">AUTH_USERS_JSON</code> en las variables de entorno del servidor o Vercel.
+            </p>
           </div>
 
           {/* Section 3: Componentes de la Arquitectura */}
@@ -189,7 +216,6 @@ export const ShareDeployModal: React.FC<ShareDeployModalProps> = ({ isOpen, onCl
               • <strong>Backend & BD MySQL:</strong> Arquitectura relacional y API de tickets por Maria Gonzales.
             </p>
           </div>
-
         </div>
 
         {/* Footer */}
@@ -201,7 +227,6 @@ export const ShareDeployModal: React.FC<ShareDeployModalProps> = ({ isOpen, onCl
             Cerrar
           </button>
         </div>
-
       </div>
     </div>
   );

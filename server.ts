@@ -6,6 +6,14 @@ import { fileURLToPath } from 'url';
 import { createRequire } from 'module';
 import { exec } from 'child_process';
 import util from 'util';
+import {
+  authenticateUser,
+  claimInitialAdmin,
+  getAuthStatus,
+  getPublicTechnicians,
+  verifyBearerToken,
+} from './api/_auth';
+import { aggregateHostsFromWebhookTickets } from './api/_hosts';
 
 const require = createRequire(import.meta.url);
 const { ZipArchive } = require('archiver');
@@ -18,15 +26,12 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
-// Enable CORS for all origins, methods, and standard headers
-app.use(
-  cors({
-    origin: '*',
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
-    credentials: true,
-  })
-);
+// Public CORS only for Zabbix webhooks and Power BI / recent polling
+const publicWebhookCors = cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'X-Requested-With', 'Accept', 'Origin'],
+});
 
 // Body parsers: support JSON, URL-encoded, and plain text fallback for Zabbix webhooks
 app.use(express.json({ limit: '10mb' }));
@@ -76,6 +81,16 @@ interface StoredWebhookTicket {
   valorActual?: string;
   tipoDispositivo?: string;
   ubicacion?: string;
+  asignadoA?: string;
+  assignedTechnician?: string;
+  acknowledgedBy?: string;
+  acknowledgedAt?: string;
+  duplicateAlertCount?: number;
+  metricsSnapshot?: {
+    cpu?: string | null;
+    ram?: string | null;
+    disco?: string | null;
+  };
   telemetriaZabbix?: {
     lastGaspReceived: boolean;
     heartbeatConsecutiveFails: number;
@@ -424,6 +439,30 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         existing.valorActual = itemValue;
         existing.horaIncidenciaVM = timeSync.timeOnly;
         existing.vmTimestamp = timeSync.vmTimestamp;
+        existing.duplicateAlertCount = (existing.duplicateAlertCount || 0) + 1;
+
+        // Actualizar métricas reales solo si Zabbix las envió en este evento
+        const dupNorm = `${eventName} ${rawMensajeFalla}`.toLowerCase();
+        const nextSnap = { ...(existing.metricsSnapshot || {}) };
+        if (payload?.cpu !== undefined && payload?.cpu !== null && String(payload.cpu).trim() !== '') {
+          nextSnap.cpu = String(payload.cpu).trim();
+        } else if ((dupNorm.includes('cpu') || dupNorm.includes('procesador')) && itemValue !== 'N/A') {
+          nextSnap.cpu = itemValue;
+        }
+        if (payload?.ram !== undefined && payload?.ram !== null && String(payload.ram).trim() !== '') {
+          nextSnap.ram = String(payload.ram).trim();
+        } else if ((dupNorm.includes('ram') || dupNorm.includes('memoria') || dupNorm.includes('memory')) && itemValue !== 'N/A') {
+          nextSnap.ram = itemValue;
+        }
+        if ((payload?.disco ?? payload?.disk) !== undefined && String(payload?.disco ?? payload?.disk).trim() !== '') {
+          nextSnap.disco = String(payload?.disco ?? payload?.disk).trim();
+        } else if ((dupNorm.includes('disco') || dupNorm.includes('disk') || dupNorm.includes('filesystem') || dupNorm.includes('storage')) && itemValue !== 'N/A') {
+          nextSnap.disco = itemValue;
+        }
+        if (Object.keys(nextSnap).length > 0) {
+          existing.metricsSnapshot = nextSnap;
+        }
+
         persistCachedTickets(receivedTickets);
 
         webhookLogs.unshift({
@@ -640,6 +679,29 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         valorActual: itemValue,
         tipoDispositivo,
         ubicacion: ubicacion || undefined,
+        duplicateAlertCount: 0,
+        metricsSnapshot: (() => {
+          const snap: { cpu?: string | null; ram?: string | null; disco?: string | null } = {};
+          if (payload?.cpu !== undefined && payload?.cpu !== null && String(payload.cpu).trim() !== '') {
+            snap.cpu = String(payload.cpu).trim();
+          } else if (casoNumero === 2 && itemValue !== 'N/A') {
+            snap.cpu = itemValue;
+          }
+          if (payload?.ram !== undefined && payload?.ram !== null && String(payload.ram).trim() !== '') {
+            snap.ram = String(payload.ram).trim();
+          } else if (casoNumero === 4 && itemValue !== 'N/A') {
+            snap.ram = itemValue;
+          }
+          if ((payload?.disco ?? payload?.disk) !== undefined && String(payload?.disco ?? payload?.disk).trim() !== '') {
+            snap.disco = String(payload?.disco ?? payload?.disk).trim();
+          } else if (
+            (normEvent.includes('disco') || normEvent.includes('disk') || normEvent.includes('filesystem') || normEvent.includes('storage')) &&
+            itemValue !== 'N/A'
+          ) {
+            snap.disco = itemValue;
+          }
+          return Object.keys(snap).length > 0 ? snap : undefined;
+        })(),
         reporterUserId: 'usr-zabbix-webhook',
         reporterName: `Sensor de Monitoreo (${hostName})`,
         reporterRole: 'Telemetría Proactiva de Red',
@@ -727,7 +789,7 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
   return res.status(405).json({ error: 'Method Not Allowed' });
 }
 
-// Mount Zabbix Webhook on multiple standard paths
+// Mount Zabbix Webhook on multiple standard paths (public CORS for Zabbix VMware)
 app.all(
   [
     '/api/webhooks/zabbix',
@@ -739,11 +801,12 @@ app.all(
     '/zabbix',
     '/api/zabbix',
   ],
+  publicWebhookCors,
   handleZabbixWebhook
 );
 
 // Fallback: If Zabbix posts to the root '/' path (because URL was configured without /api/webhooks/zabbix)
-app.post('/', (req, res, next) => {
+app.post('/', publicWebhookCors, (req, res, next) => {
   if (req.body && (req.body.host_name || req.body.event_name || req.body.hostname || req.body.origen || req.body.severity)) {
     console.log('[Zabbix Webhook] Detected POST to root / with Zabbix payload. Routing to handler.');
     return handleZabbixWebhook(req, res);
@@ -761,11 +824,173 @@ app.get('/api/webhooks/logs', (_req, res) => {
 });
 
 // ==========================================
+// 1b. Auth & Role-Protected Endpoints (CU-06, CU-07, CU-10)
+// ==========================================
+
+app.get('/api/auth/status', (_req, res) => {
+  res.json(getAuthStatus());
+});
+
+app.post('/api/auth/bootstrap', (req, res) => {
+  const result = claimInitialAdmin({
+    username: req.body?.username,
+    nombre: req.body?.nombre,
+    email: req.body?.email,
+    password: req.body?.password,
+  });
+  return res.status(result.success ? 200 : 400).json(result);
+});
+
+app.post('/api/auth/login', (req, res) => {
+  const result = authenticateUser(
+    req.body?.identifier || req.body?.username || '',
+    req.body?.password || ''
+  );
+  return res.status(result.success ? 200 : 401).json(result);
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Sesión no válida o expirada.' });
+  }
+  return res.json({ success: true, user });
+});
+
+app.get('/api/technicians', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  return res.json({ success: true, technicians: getPublicTechnicians() });
+});
+
+// CU-10: Monitorear estado de red y equipos (solo ADMIN y TECNICO)
+app.get('/api/hosts', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  if (user.rol !== 'ADMIN' && user.rol !== 'TECNICO') {
+    return res.status(403).json({
+      success: false,
+      error: 'Acceso restringido a roles ADMIN o TECNICO.',
+    });
+  }
+  const allTickets = loadCachedTickets();
+  const hosts = aggregateHostsFromWebhookTickets(allTickets);
+  return res.json({
+    success: true,
+    count: hosts.length,
+    hosts,
+  });
+});
+
+// CU-06: Aceptar alerta automática (solo ADMIN y TECNICO)
+app.patch('/api/tickets/:id/acknowledge', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  if (user.rol !== 'ADMIN' && user.rol !== 'TECNICO') {
+    return res.status(403).json({
+      success: false,
+      error: 'Solo un técnico o administrador puede aceptar la alerta.',
+    });
+  }
+
+  const targetId = String(req.params.id || '').trim();
+  const cache = loadCachedTickets();
+  const idx = cache.findIndex((t) => t.id === targetId);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: 'Ticket no encontrado en caché del servidor.' });
+  }
+
+  const formatter = new Intl.DateTimeFormat('es-PE', {
+    timeZone: 'America/Lima',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(new Date());
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  const ackAt = `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second} (GMT-5)`;
+
+  cache[idx].acknowledgedBy = user.nombre;
+  cache[idx].acknowledgedAt = ackAt;
+  persistCachedTickets(cache);
+
+  return res.json({
+    success: true,
+    ticket: cache[idx],
+  });
+});
+
+// CU-07: Asignar ticket a técnico (solo ADMIN / Coordinador)
+app.patch('/api/tickets/:id/assign', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  if (user.rol !== 'ADMIN') {
+    return res.status(403).json({
+      success: false,
+      error: 'Solo el coordinador (ADMIN) puede asignar técnicos.',
+    });
+  }
+
+  const asignadoA = String(req.body?.asignadoA || '').trim();
+  if (!asignadoA) {
+    return res.status(400).json({ success: false, error: 'Debe indicar el técnico asignado.' });
+  }
+
+  const targetId = String(req.params.id || '').trim();
+  const cache = loadCachedTickets();
+  const idx = cache.findIndex((t) => t.id === targetId);
+  if (idx === -1) {
+    return res.status(404).json({ success: false, error: 'Ticket no encontrado en caché del servidor.' });
+  }
+
+  const formatter = new Intl.DateTimeFormat('es-PE', {
+    timeZone: 'America/Lima',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const timeStr = `${formatter.format(new Date())} (GMT-5)`;
+
+  cache[idx].asignadoA = asignadoA;
+  cache[idx].assignedTechnician = asignadoA;
+  cache[idx].comments = [
+    ...(cache[idx].comments || []),
+    {
+      id: `c-assign-${Date.now()}`,
+      author: user.nombre,
+      role: 'Coordinador / Admin',
+      text: `Ticket asignado al técnico: ${asignadoA}.`,
+      timestamp: timeStr,
+    },
+  ];
+  persistCachedTickets(cache);
+
+  return res.json({
+    success: true,
+    ticket: cache[idx],
+  });
+});
+
+// ==========================================
 // 2. Tickets API for Frontend Sync
 // ==========================================
 
 // GET /api/tickets/recent (frontend polls this to pick up real Zabbix tickets)
-app.get('/api/tickets/recent', (_req, res) => {
+app.get('/api/tickets/recent', publicWebhookCors, (_req, res) => {
   const allTickets = loadCachedTickets();
   res.json({
     success: true,

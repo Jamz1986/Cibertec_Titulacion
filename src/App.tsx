@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Ticket, Priority, TicketStatus } from './types/helpdesk';
 import { INITIAL_TICKETS, PRIORITY_CONFIGS } from './data/mockData';
 import { PrioritySelector } from './components/PrioritySelector';
@@ -46,6 +46,8 @@ import {
   HelpCircle,
   BarChart3,
   MapPin,
+  Activity,
+  UserCheck,
 } from 'lucide-react';
 import { EmergencyPhoneModal } from './components/EmergencyPhoneModal';
 import { LoginPortal } from './components/LoginPortal';
@@ -53,23 +55,33 @@ import { PacketTracerTopology } from './components/PacketTracerTopology';
 import { ZabbixConnectionModal } from './components/ZabbixConnectionModal';
 import { FAQSection } from './components/FAQSection';
 import { DistrictFailureDashboard } from './components/DistrictFailureDashboard';
+import { HostMonitorView } from './components/HostMonitorView';
 import { cleanAndEnrichTicket } from './utils/ticketCleaner';
 
 export default function App() {
-  const { currentUser, logout, hasRole } = useAuth();
+  const { currentUser, token, logout, hasRole } = useAuth();
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isZabbixModalOpen, setIsZabbixModalOpen] = useState(false);
   const isGeneralUser = currentUser?.rol === 'DOCENTE' || currentUser?.rol === 'ALUMNO';
   const isTechnician = currentUser?.rol === 'TECNICO';
   const isAdmin = currentUser?.rol === 'ADMIN';
+  const isTechOrAdmin = isTechnician || isAdmin;
 
   const [activeSection, setActiveSection] = useState<
-    'tickets' | 'packet-tracer' | 'siniestros' | 'distritos-report' | 'priorities' | 'thesis' | 'architecture' | 'faq'
+    'tickets' | 'hosts' | 'packet-tracer' | 'siniestros' | 'distritos-report' | 'priorities' | 'thesis' | 'architecture' | 'faq'
   >('tickets');
 
-  // Audio chime for real-time alert reception
-  const playAlertChime = () => {
+  const alertSoundIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const alertedTicketIdsRef = useRef<Set<string>>(new Set());
+  const isTechOrAdminRef = useRef<boolean>(isTechOrAdmin);
+
+  useEffect(() => {
+    isTechOrAdminRef.current = isTechOrAdmin;
+  }, [isTechOrAdmin]);
+
+  // Audio chime for real-time alert reception (CU-06)
+  const playAlertChimeOnce = () => {
     try {
       const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
       if (!AudioCtx) return;
@@ -81,15 +93,58 @@ export default function App() {
       osc.type = 'sine';
       osc.frequency.setValueAtTime(880, ctx.currentTime);
       osc.frequency.setValueAtTime(1174.66, ctx.currentTime + 0.12);
-      gain.gain.setValueAtTime(0.3, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      gain.gain.setValueAtTime(0.28, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
       osc.start(ctx.currentTime);
-      osc.stop(ctx.currentTime + 0.4);
+      osc.stop(ctx.currentTime + 0.45);
     } catch {}
   };
 
+  const stopAlertSound = () => {
+    if (alertSoundIntervalRef.current) {
+      clearInterval(alertSoundIntervalRef.current);
+      alertSoundIntervalRef.current = null;
+    }
+  };
+
+  const startAlertSound = () => {
+    stopAlertSound();
+    playAlertChimeOnce();
+    alertSoundIntervalRef.current = setInterval(() => {
+      playAlertChimeOnce();
+    }, 2800);
+  };
+
+  useEffect(() => {
+    return () => stopAlertSound();
+  }, []);
+
   const [latestZabbixAlert, setLatestZabbixAlert] = useState<Ticket | null>(null);
   const [zabbixWebhookEventCount, setZabbixWebhookEventCount] = useState<number>(0);
+  const [serverTechnicians, setServerTechnicians] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!token || !isTechOrAdmin) {
+      setServerTechnicians([]);
+      return;
+    }
+    let active = true;
+    fetch('/api/technicians', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (active && data?.success && Array.isArray(data.technicians)) {
+          setServerTechnicians(
+            data.technicians.map((t: any) => String(t.nombre || '').trim()).filter(Boolean)
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [token, isTechOrAdmin]);
 
   const [tickets, setTickets] = useState<Ticket[]>(() => {
     try {
@@ -119,18 +174,32 @@ export default function App() {
   const [isNewTicketModalOpen, setIsNewTicketModalOpen] = useState(false);
   const [selectedTicket, setSelectedTicket] = useState<Ticket | null>(null);
 
-  // Filters
+  // Filters (CU-04 + CU-07)
   const [searchQuery, setSearchQuery] = useState('');
   const [priorityFilter, setPriorityFilter] = useState<'all' | Priority>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | TicketStatus>('all');
   const [origenFilter, setOrigenFilter] = useState<'all' | 'AUTOMATICO' | 'MANUAL'>('all');
+  const [assignedFilter, setAssignedFilter] = useState<string>('all');
   const [onlyMyTickets, setOnlyMyTickets] = useState<boolean>(isGeneralUser);
 
-  // When switching role, align default view and filtering
+  const availableTechnicians = useMemo(() => {
+    const set = new Set<string>(serverTechnicians);
+    tickets.forEach((t) => {
+      const tech = t.asignadoA || t.assignedTechnician;
+      if (tech) set.add(tech);
+    });
+    return Array.from(set);
+  }, [serverTechnicians, tickets]);
+
+  // When switching role, align default view, alert state, and filtering
   React.useEffect(() => {
     setOnlyMyTickets(isGeneralUser);
-    if (isGeneralUser && activeSection === 'thesis') {
-      setActiveSection('tickets');
+    if (!isTechOrAdmin) {
+      stopAlertSound();
+      setLatestZabbixAlert(null);
+      if (activeSection === 'thesis' || activeSection === 'hosts') {
+        setActiveSection('tickets');
+      }
     }
   }, [currentUser?.rol]);
 
@@ -142,7 +211,7 @@ export default function App() {
         const existingMap = new Map(prev.map((t) => [t.id, t]));
         const newTickets = cleanedIncoming.filter((t) => !existingMap.has(t.id));
 
-        // Detect status/metric updates on existing tickets (e.g., RESOLVED from Zabbix)
+        // Detect status/metric/duplicate/acknowledgment updates on existing tickets without re-playing sound
         let hasUpdates = false;
         const incomingById = new Map(cleanedIncoming.map((t) => [t.id, t]));
         const updatedPrev = prev.map((t) => {
@@ -151,40 +220,67 @@ export default function App() {
             match &&
             (match.status !== t.status ||
               match.valorActual !== t.valorActual ||
-              match.comments.length !== t.comments.length)
+              match.comments.length !== t.comments.length ||
+              (match.duplicateAlertCount || 0) !== (t.duplicateAlertCount || 0) ||
+              match.acknowledgedBy !== t.acknowledgedBy ||
+              match.asignadoA !== t.asignadoA)
           ) {
             hasUpdates = true;
-            return match;
+            // Preserve local acknowledgment if server copy hasn't recorded it yet
+            const mergedMatch: Ticket = {
+              ...match,
+              acknowledgedBy: match.acknowledgedBy || t.acknowledgedBy,
+              acknowledgedAt: match.acknowledgedAt || t.acknowledgedAt,
+              asignadoA: match.asignadoA || t.asignadoA,
+              assignedTechnician: match.assignedTechnician || t.assignedTechnician,
+            };
+            setLatestZabbixAlert((curr) => (curr && curr.id === mergedMatch.id ? mergedMatch : curr));
+            return mergedMatch;
           }
           return t;
         });
 
         if (newTickets.length > 0) {
-          setLatestZabbixAlert(newTickets[0]);
-          playAlertChime();
-          setActiveSection('tickets');
-          setOrigenFilter('all');
-          setPriorityFilter('all');
-          setStatusFilter('all');
-          setSearchQuery('');
-          setOnlyMyTickets(false);
-
-          newTickets.forEach((t) => {
-            if (
-              t.sinistroZonal ||
-              t.outageCause === 'CORTE_ELECTRICO_MASIVO' ||
-              t.telemetriaZabbix?.probableCausa === 'CORTE_ELECTRICO_MASIVO' ||
-              (t.priority === 'urgent' && t.casoNumero === 1)
-            ) {
-              setCriticalBlackoutAlert({
-                ticket: t,
-                schoolName: t.schoolName,
-                ugel: t.ugel,
-                probableCausa: t.telemetriaZabbix?.probableCausa || 'CORTE_ELECTRICO_MASIVO',
-              });
-              setPhoneTargetSchool(t.schoolName);
+          // CU-06: Solo alertar con sonido + banner si hay sesión de TECNICO o ADMIN y nunca repetir el mismo ticket
+          if (isTechOrAdminRef.current) {
+            const alertCandidate = newTickets.find(
+              (t) =>
+                t.origen === 'AUTOMATICO' &&
+                !t.acknowledgedBy &&
+                t.status !== 'resolved' &&
+                t.status !== 'closed' &&
+                !alertedTicketIdsRef.current.has(t.id)
+            );
+            if (alertCandidate) {
+              alertedTicketIdsRef.current.add(alertCandidate.id);
+              setLatestZabbixAlert(alertCandidate);
+              startAlertSound();
+              setActiveSection('tickets');
+              setOrigenFilter('all');
+              setPriorityFilter('all');
+              setStatusFilter('all');
+              setAssignedFilter('all');
+              setSearchQuery('');
+              setOnlyMyTickets(false);
             }
-          });
+
+            newTickets.forEach((t) => {
+              if (
+                t.sinistroZonal ||
+                t.outageCause === 'CORTE_ELECTRICO_MASIVO' ||
+                t.telemetriaZabbix?.probableCausa === 'CORTE_ELECTRICO_MASIVO' ||
+                (t.priority === 'urgent' && t.casoNumero === 1)
+              ) {
+                setCriticalBlackoutAlert({
+                  ticket: t,
+                  schoolName: t.schoolName,
+                  ugel: t.ugel,
+                  probableCausa: t.telemetriaZabbix?.probableCausa || 'CORTE_ELECTRICO_MASIVO',
+                });
+                setPhoneTargetSchool(t.schoolName);
+              }
+            });
+          }
           return [...newTickets, ...updatedPrev];
         }
         return hasUpdates ? updatedPrev : prev;
@@ -353,6 +449,49 @@ export default function App() {
     setTickets([newAutoTicket, ...tickets]);
   };
 
+  const handleAcknowledgeAlert = async (alertTicket: Ticket) => {
+    stopAlertSound();
+
+    const formatter = new Intl.DateTimeFormat('es-PE', {
+      timeZone: 'America/Lima',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    const parts = formatter.formatToParts(new Date());
+    const map: Record<string, string> = {};
+    for (const p of parts) map[p.type] = p.value;
+    const ackAt = `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second} (GMT-5)`;
+    const ackBy = currentUser?.nombre || 'Técnico TI';
+
+    const updatedTicket: Ticket = {
+      ...alertTicket,
+      acknowledgedBy: ackBy,
+      acknowledgedAt: ackAt,
+    };
+
+    alertedTicketIdsRef.current.add(alertTicket.id);
+    setTickets((prev) => prev.map((t) => (t.id === alertTicket.id ? updatedTicket : t)));
+    setLatestZabbixAlert(null);
+    setActiveSection('tickets');
+    setSelectedTicket(updatedTicket);
+
+    if (token) {
+      try {
+        await fetch(`/api/tickets/${encodeURIComponent(alertTicket.id)}/acknowledge`, {
+          method: 'PATCH',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+      } catch {
+        // Ignorar si el ticket existe únicamente en caché local
+      }
+    }
+  };
+
   const filteredTickets = tickets.filter((t) => {
     if (onlyMyTickets && currentUser && t.origen === 'MANUAL') {
       const isMine =
@@ -363,6 +502,16 @@ export default function App() {
     if (origenFilter !== 'all' && t.origen !== origenFilter) return false;
     if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false;
     if (statusFilter !== 'all' && t.status !== statusFilter) return false;
+    if (assignedFilter !== 'all') {
+      const assignedName = t.asignadoA || t.assignedTechnician || '';
+      if (assignedFilter === 'unassigned') {
+        if (assignedName) return false;
+      } else if (assignedFilter === 'mine') {
+        if (!currentUser || assignedName !== currentUser.nombre) return false;
+      } else if (assignedName !== assignedFilter) {
+        return false;
+      }
+    }
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase();
       const match =
@@ -555,6 +704,28 @@ export default function App() {
             </span>
           </button>
 
+          {(isAdmin || isTechnician) && (
+            <button
+              onClick={() => {
+                setActiveSection('hosts');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+                activeSection === 'hosts'
+                  ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <Activity className="w-4 h-4 text-emerald-600" />
+                <span>Red y Equipos</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
+                En vivo
+              </span>
+            </button>
+          )}
+
           <button
             onClick={() => {
               setActiveSection('packet-tracer');
@@ -674,7 +845,14 @@ export default function App() {
                 {currentUser?.nombre}
               </p>
               <p className="text-[10px] text-slate-400 font-medium truncate mt-0.5">
-                {currentUser?.rol === 'ADMIN' ? 'Admin NOC' : 'Técnico TI'} · Mesa de Ayuda
+                {currentUser?.rol === 'ADMIN'
+                  ? 'Coordinador / Admin'
+                  : currentUser?.rol === 'TECNICO'
+                  ? 'Técnico TI'
+                  : currentUser?.rol === 'DOCENTE'
+                  ? 'Docente'
+                  : 'Alumno'}{' '}
+                · Mesa de Ayuda
               </p>
             </div>
           </div>
@@ -689,7 +867,11 @@ export default function App() {
             </button>
 
             <button
-              onClick={() => logout()}
+              onClick={() => {
+                stopAlertSound();
+                setLatestZabbixAlert(null);
+                logout();
+              }}
               className="inline-flex items-center justify-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-semibold transition-colors cursor-pointer"
             >
               <LogOut className="w-3.5 h-3.5" />
@@ -779,7 +961,9 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-2 text-xs">
                       <div>
                         <span className="text-[10px] uppercase font-bold text-slate-400 block">Equipo / Host</span>
-                        <span className="font-semibold text-slate-800">{latestZabbixAlert.reporterName || 'PC-ALUMNO-01'}</span>
+                        <span className="font-semibold text-slate-800">
+                          {latestZabbixAlert.hostName || latestZabbixAlert.reporterName || 'PC-ALUMNO-01'}
+                        </span>
                       </div>
                       <div>
                         <span className="text-[10px] uppercase font-bold text-slate-400 block">IP / Ubicación</span>
@@ -788,7 +972,7 @@ export default function App() {
                     </div>
 
                     <div className="text-xs">
-                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Problema Detectado en Zabbix</span>
+                      <span className="text-[10px] uppercase font-bold text-slate-400 block">Título de la Incidencia</span>
                       <span className="font-bold text-slate-900 leading-snug block mt-0.5 text-sm">
                         {latestZabbixAlert.title}
                       </span>
@@ -801,32 +985,31 @@ export default function App() {
                       </p>
                     </div>
 
-                    <div className="flex items-center justify-between pt-1">
+                    <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
                       <span className="text-xs font-medium text-slate-500">Prioridad Asignada:</span>
-                      <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200 uppercase">
-                        {latestZabbixAlert.priority} · SLA &lt; {latestZabbixAlert.slaTargetHours}h
-                      </span>
+                      <div className="flex items-center gap-2">
+                        {(latestZabbixAlert.duplicateAlertCount || 0) > 0 && (
+                          <span className="text-[11px] font-mono font-bold px-2.5 py-0.5 rounded-full bg-purple-100 text-purple-900 border border-purple-300">
+                            +{latestZabbixAlert.duplicateAlertCount} duplicado(s)
+                          </span>
+                        )}
+                        <span className="text-xs font-bold px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-200 uppercase">
+                          {PRIORITY_CONFIGS[latestZabbixAlert.priority].label} · SLA &lt; {latestZabbixAlert.slaTargetHours}h
+                        </span>
+                      </div>
                     </div>
                   </div>
 
                   <p className="text-center text-[11px] text-slate-500 font-medium">
-                    ✓ La incidencia ha sido insertada en la posición superior del listado de tickets.
+                    Al pulsar Aceptar se detendrá el aviso sonoro y se abrirá la ficha del ticket.
                   </p>
                 </div>
 
-                {/* Footer with ONLY the "Aceptar" button as requested */}
+                {/* Footer with ONLY the "Aceptar" button */}
                 <div className="p-5 bg-slate-50 border-t border-slate-100">
                   <button
                     type="button"
-                    onClick={() => {
-                      setLatestZabbixAlert(null);
-                      setActiveSection('tickets');
-                      setOrigenFilter('all');
-                      setPriorityFilter('all');
-                      setStatusFilter('all');
-                      setSearchQuery('');
-                      setOnlyMyTickets(false);
-                    }}
+                    onClick={() => handleAcknowledgeAlert(latestZabbixAlert)}
                     className="w-full py-3.5 px-6 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-bold text-sm tracking-wide shadow-lg shadow-slate-900/20 active:scale-[0.99] transition-all cursor-pointer flex items-center justify-center gap-2"
                   >
                     <CheckCircle2 className="w-5 h-5 text-emerald-400" />
@@ -1102,12 +1285,32 @@ export default function App() {
                     </select>
                   </div>
 
-                  {(priorityFilter !== 'all' || statusFilter !== 'all' || origenFilter !== 'all' || searchQuery) && (
+                  {/* Assigned Technician Filter (CU-07) */}
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-slate-500 font-medium">Asignado:</span>
+                    <select
+                      value={assignedFilter}
+                      onChange={(e) => setAssignedFilter(e.target.value)}
+                      className="px-2.5 py-1.5 rounded-lg border border-slate-300 bg-white text-slate-900 font-medium cursor-pointer"
+                    >
+                      <option value="all">Todos</option>
+                      <option value="unassigned">Sin asignar</option>
+                      {isTechOrAdmin && <option value="mine">Asignados a mí</option>}
+                      {availableTechnicians.map((techName) => (
+                        <option key={techName} value={techName}>
+                          {techName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {(priorityFilter !== 'all' || statusFilter !== 'all' || origenFilter !== 'all' || assignedFilter !== 'all' || searchQuery) && (
                     <button
                       onClick={() => {
                         setPriorityFilter('all');
                         setStatusFilter('all');
                         setOrigenFilter('all');
+                        setAssignedFilter('all');
                         setSearchQuery('');
                       }}
                       className="px-2.5 py-1.5 text-slate-500 hover:text-slate-900 text-xs font-medium cursor-pointer"
@@ -1139,6 +1342,7 @@ export default function App() {
                         setPriorityFilter('all');
                         setStatusFilter('all');
                         setOrigenFilter('all');
+                        setAssignedFilter('all');
                         setSearchQuery('');
                       }}
                       className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200 transition-colors cursor-pointer"
@@ -1226,6 +1430,37 @@ export default function App() {
                                 </span>
                               </>
                             )}
+                            {ticket.origen === 'AUTOMATICO' && (
+                              <>
+                                <span>·</span>
+                                {ticket.acknowledgedBy ? (
+                                  <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-200 font-semibold">
+                                    Aceptado por {ticket.acknowledgedBy}
+                                  </span>
+                                ) : (
+                                  <span className="text-amber-800 bg-amber-50 px-1.5 py-0.5 rounded border border-amber-200 font-semibold">
+                                    Pendiente de aceptar
+                                  </span>
+                                )}
+                              </>
+                            )}
+                            {(ticket.duplicateAlertCount || 0) > 0 && (
+                              <>
+                                <span>·</span>
+                                <span className="font-mono text-purple-800 bg-purple-50 px-1.5 py-0.5 rounded border border-purple-200 font-bold">
+                                  +{ticket.duplicateAlertCount} duplicado(s)
+                                </span>
+                              </>
+                            )}
+                            {(ticket.asignadoA || ticket.assignedTechnician) && (
+                              <>
+                                <span>·</span>
+                                <span className="inline-flex items-center gap-1 text-slate-700 bg-slate-100 px-1.5 py-0.5 rounded border border-slate-200 font-semibold">
+                                  <UserCheck className="w-3 h-3 text-indigo-500" />
+                                  <span>Asignado: {ticket.asignadoA || ticket.assignedTechnician}</span>
+                                </span>
+                              </>
+                            )}
                             {ticket.vmwareEnv && (
                               <>
                                 <span>·</span>
@@ -1263,6 +1498,14 @@ export default function App() {
                 )}
               </div>
             </div>
+          )}
+
+          {/* Section: CU-10 Red y Equipos (solo ADMIN y TECNICO) */}
+          {activeSection === 'hosts' && (isAdmin || isTechnician) && (
+            <HostMonitorView
+              token={token}
+              onSelectTicket={(t) => setSelectedTicket(t)}
+            />
           )}
 
           {/* Section: Preguntas Frecuentes (FAQ) */}
@@ -1456,6 +1699,7 @@ export default function App() {
         isOpen={selectedTicket !== null}
         onClose={() => setSelectedTicket(null)}
         onUpdateTicket={handleUpdateTicket}
+        availableTechnicians={availableTechnicians}
       />
 
       {/* Share & Deployment Modal for the Team */}

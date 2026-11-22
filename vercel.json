@@ -2,6 +2,38 @@
   "version": 2,
   "rewrites": [
     {
+      "source": "/api/auth/status",
+      "destination": "/api/auth?action=status"
+    },
+    {
+      "source": "/api/auth/bootstrap",
+      "destination": "/api/auth?action=bootstrap"
+    },
+    {
+      "source": "/api/auth/login",
+      "destination": "/api/auth?action=login"
+    },
+    {
+      "source": "/api/auth/me",
+      "destination": "/api/auth?action=me"
+    },
+    {
+      "source": "/api/technicians",
+      "destination": "/api/auth?action=technicians"
+    },
+    {
+      "source": "/api/hosts",
+      "destination": "/api/webhooks/zabbix?action=hosts"
+    },
+    {
+      "source": "/api/tickets/:id/acknowledge",
+      "destination": "/api/webhooks/zabbix?action=acknowledge&id=:id"
+    },
+    {
+      "source": "/api/tickets/:id/assign",
+      "destination": "/api/webhooks/zabbix?action=assign&id=:id"
+    },
+    {
       "source": "/api/webhooks/zabbix",
       "destination": "/api/webhooks/zabbix"
     },

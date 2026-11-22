@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Ticket, Priority, TicketStatus, VMwareTestResult } from '../types/helpdesk';
 import { PRIORITY_CONFIGS } from '../data/mockData';
 import { VMwareTester } from './VMwareTester';
@@ -22,6 +22,7 @@ import {
   WifiOff,
   PhoneCall,
   GraduationCap,
+  UserCheck,
 } from 'lucide-react';
 
 import { useAuth } from '../context/AuthContext';
@@ -32,6 +33,7 @@ interface TicketDetailModalProps {
   isOpen: boolean;
   onClose: () => void;
   onUpdateTicket: (updated: Ticket) => void;
+  availableTechnicians?: string[];
 }
 
 export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
@@ -39,20 +41,61 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
   isOpen,
   onClose,
   onUpdateTicket,
+  availableTechnicians = [],
 }) => {
-  const { currentUser, hasRole } = useAuth();
+  const { currentUser, token, hasRole } = useAuth();
   const isTechnicianOrAdmin = hasRole(['TECNICO', 'ADMIN']);
-
-  if (!isOpen || !ticket) return null;
+  const isCoordinator = currentUser?.rol === 'ADMIN';
 
   const [activeTab, setActiveTab] = useState<'info' | 'vmware_test' | 'comments'>('info');
   const [commentText, setCommentText] = useState('');
   const [commentAuthor, setCommentAuthor] = useState(
-    currentUser?.nombre || 'Ing. Especialista TI'
+    currentUser?.nombre || 'Especialista TI'
   );
-  const [resolutionNote, setResolutionNote] = useState(ticket.resolutionNotes || '');
+  const [resolutionNote, setResolutionNote] = useState(ticket?.resolutionNotes || '');
   const [showPriorityEditor, setShowPriorityEditor] = useState(false);
   const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
+  const [serverTechnicians, setServerTechnicians] = useState<string[]>([]);
+
+  useEffect(() => {
+    setCommentAuthor(currentUser?.nombre || 'Especialista TI');
+  }, [currentUser?.nombre]);
+
+  useEffect(() => {
+    setResolutionNote(ticket?.resolutionNotes || '');
+    setShowPriorityEditor(false);
+  }, [ticket?.id, ticket?.resolutionNotes]);
+
+  useEffect(() => {
+    if (!isOpen || !isCoordinator || !token) return;
+    let active = true;
+    fetch('/api/technicians', {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (active && data?.success && Array.isArray(data.technicians)) {
+          setServerTechnicians(
+            data.technicians.map((t: any) => String(t.nombre || '').trim()).filter(Boolean)
+          );
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isOpen, isCoordinator, token]);
+
+  const mergedTechnicians = useMemo(() => {
+    const set = new Set<string>();
+    serverTechnicians.forEach((n) => n && set.add(n));
+    availableTechnicians.forEach((n) => n && set.add(n));
+    const currentAssigned = ticket?.asignadoA || ticket?.assignedTechnician;
+    if (currentAssigned) set.add(currentAssigned);
+    return Array.from(set);
+  }, [serverTechnicians, availableTechnicians, ticket?.asignadoA, ticket?.assignedTechnician]);
+
+  if (!isOpen || !ticket) return null;
 
   const handleLogCall = (_ticketId: string, logMessage: string) => {
     const updated: Ticket = {
@@ -119,6 +162,55 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
       ],
     };
     onUpdateTicket(updated);
+  };
+
+  const handleAssignTechnician = async (newTech: string) => {
+    const cleanTech = newTech.trim();
+    const currentAssigned = ticket.asignadoA || ticket.assignedTechnician || '';
+    if (cleanTech === currentAssigned) return;
+
+    const formatter = new Intl.DateTimeFormat('es-PE', {
+      timeZone: 'America/Lima',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false,
+    });
+    const timestamp = `${formatter.format(new Date())} (GMT-5)`;
+
+    const updated: Ticket = {
+      ...ticket,
+      asignadoA: cleanTech || undefined,
+      assignedTechnician: cleanTech || undefined,
+      comments: [
+        ...ticket.comments,
+        {
+          id: `c-assign-${Date.now()}`,
+          author: currentUser?.nombre || 'Coordinador / Admin',
+          role: 'Coordinador / Admin',
+          text: cleanTech
+            ? `Ticket asignado al técnico: ${cleanTech}.`
+            : 'Asignación de técnico removida.',
+          timestamp,
+        },
+      ],
+    };
+    onUpdateTicket(updated);
+
+    if (cleanTech && token) {
+      try {
+        await fetch(`/api/tickets/${encodeURIComponent(ticket.id)}/assign`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({ asignadoA: cleanTech }),
+        });
+      } catch {
+        // Ignorar si el ticket existe únicamente en el estado local
+      }
+    }
   };
 
   const handleAddComment = (e: React.FormEvent) => {
@@ -246,6 +338,32 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                 </span>
               )}
             </div>
+
+            <span className="text-slate-300 dark:text-slate-700">|</span>
+
+            {/* CU-07: Asignación de Técnico (solo Coordinador / ADMIN editable) */}
+            <div className="flex items-center gap-1.5">
+              <UserCheck className="w-3.5 h-3.5 text-indigo-500" />
+              <span className="text-slate-500 font-medium">Asignado a:</span>
+              {isCoordinator ? (
+                <select
+                  value={ticket.asignadoA || ticket.assignedTechnician || ''}
+                  onChange={(e) => handleAssignTechnician(e.target.value)}
+                  className="px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-medium cursor-pointer"
+                >
+                  <option value="">Sin asignar</option>
+                  {mergedTechnicians.map((techName) => (
+                    <option key={techName} value={techName}>
+                      {techName}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-semibold text-slate-800 dark:text-slate-200">
+                  {ticket.asignadoA || ticket.assignedTechnician || 'Sin asignar'}
+                </span>
+              )}
+            </div>
           </div>
 
           <div className="flex items-center gap-3">
@@ -367,6 +485,33 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
                   <span>·</span>
                   <span><strong>Dispositivo:</strong> {ticket.classroomLab}</span>
                 </div>
+              </div>
+            )}
+
+            {/* CU-06: Estado de aceptación de alerta automática */}
+            {ticket.origen === 'AUTOMATICO' && (
+              <div className="p-3.5 rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/30 flex flex-wrap items-center justify-between gap-2 text-xs">
+                <div className="flex items-center gap-2">
+                  {ticket.acknowledgedBy ? (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-100 text-emerald-800 border border-emerald-200 font-semibold">
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>
+                        Aceptado por {ticket.acknowledgedBy}
+                        {ticket.acknowledgedAt ? ` · ${ticket.acknowledgedAt}` : ''}
+                      </span>
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-amber-100 text-amber-800 border border-amber-200 font-semibold">
+                      <AlertTriangle className="w-3.5 h-3.5" />
+                      <span>Pendiente de aceptar</span>
+                    </span>
+                  )}
+                </div>
+                {(ticket.duplicateAlertCount || 0) > 0 && (
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-purple-100 text-purple-800 border border-purple-200 font-mono font-bold text-[11px]">
+                    +{ticket.duplicateAlertCount} alerta(s) duplicada(s)
+                  </span>
+                )}
               </div>
             )}
 

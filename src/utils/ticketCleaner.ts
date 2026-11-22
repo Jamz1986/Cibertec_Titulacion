@@ -231,6 +231,13 @@ export function cleanAndEnrichTicket(rawTicket: any): Ticket {
     horaIncidenciaVM,
     vmTimestamp,
     zonaHorariaVM: 'GMT-5 (UTC-5 Perú / VMware)',
+    asignadoA: rawTicket.asignadoA || rawTicket.assignedTechnician || undefined,
+    assignedTechnician: rawTicket.asignadoA || rawTicket.assignedTechnician || undefined,
+    acknowledgedBy: rawTicket.acknowledgedBy || undefined,
+    acknowledgedAt: rawTicket.acknowledgedAt || undefined,
+    duplicateAlertCount:
+      typeof rawTicket.duplicateAlertCount === 'number' ? rawTicket.duplicateAlertCount : 0,
+    metricsSnapshot: rawTicket.metricsSnapshot || undefined,
   };
   delete cleanedTicket.casoHistoriaJurado;
   return cleanedTicket as Ticket;

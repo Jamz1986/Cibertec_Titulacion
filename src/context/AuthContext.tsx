@@ -1,112 +1,65 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { AppUser, UserRole } from '../types/helpdesk';
 
-export interface TeamMemberAccount extends AppUser {
-  username: string;
-  password: string;
-  especialidad: string;
+interface AuthActionResult {
+  success: boolean;
+  error?: string;
 }
 
-// Cuentas oficiales de los 4 miembros autores del proyecto de titulación CIBERTEC 2026
-export const TEAM_MEMBERS: TeamMemberAccount[] = [
-  {
-    id: 'usr-jhinojosa',
-    username: 'jhinojosa',
-    nombre: 'Josealejandro Jhojan Hinojosa Quispe',
-    email: 'jhinojosa@cibertec.edu.pe',
-    password: 'hinojosa2026',
-    rol: 'ADMIN',
-    rolLabel: 'Jefe de Proyecto / Administrador de Red',
-    institucionSede: 'Mesa de Ayuda TI - Sede Central',
-    ugel: 'Mesa de Ayuda',
-    departamento: 'Jefatura de Redes y Telecomunicaciones',
-    cargo: 'Jefe de Proyecto / Administrador de Redes y Help Desk',
-    especialidad: 'Administración de Redes y Comunicaciones',
-  },
-  {
-    id: 'usr-lgranados',
-    username: 'lgranados',
-    nombre: 'Leonardo Ruben Granados Ortega',
-    email: 'lgranados@cibertec.edu.pe',
-    password: 'granados2026',
-    rol: 'TECNICO',
-    rolLabel: 'Analista de Infraestructura TI & Soporte Técnico',
-    institucionSede: 'Mesa de Ayuda TI / CIBERTEC',
-    ugel: 'Mesa de Ayuda',
-    departamento: 'Área de Soporte Técnico y Telecomunicaciones',
-    cargo: 'Especialista en Infraestructura TI & Help Desk',
-    especialidad: 'Administración de Redes y Comunicaciones',
-  },
-  {
-    id: 'usr-rfonseca',
-    username: 'rfonseca',
-    nombre: 'Renzo Erick Fonseca Vilchez',
-    email: 'rfonseca@cibertec.edu.pe',
-    password: 'fonseca2026',
-    rol: 'ADMIN',
-    rolLabel: 'Analista de Redes y Telecomunicaciones',
-    institucionSede: 'Laboratorio de Redes y Enrutamiento Cisco',
-    ugel: 'Mesa de Ayuda',
-    departamento: 'Diseño de Redes & Ciberseguridad Perimetral',
-    cargo: 'Analista de Redes y Conectividad Escolar',
-    especialidad: 'Administración de Redes y Comunicaciones',
-  },
-  {
-    id: 'usr-mgonzales',
-    username: 'mgonzales',
-    nombre: 'Maria Soledad Gonzales Lozano',
-    email: 'mgonzales@cibertec.edu.pe',
-    password: 'gonzales2026',
-    rol: 'TECNICO',
-    rolLabel: 'Analista Desarrolladora de Software & Gestión de Datos',
-    institucionSede: 'Área de Sistemas e Integración Web',
-    ugel: 'Mesa de Ayuda',
-    departamento: 'Ingeniería de Software & Gestión de Datos',
-    cargo: 'Desarrolladora Backend & Gestión de Base de Datos',
-    especialidad: 'Computación e Informática',
-  },
-];
-
-export const PRESET_ACCOUNTS: AppUser[] = TEAM_MEMBERS;
+interface ClaimAdminInput {
+  username: string;
+  nombre?: string;
+  email?: string;
+  password: string;
+}
 
 interface AuthContextType {
-  currentUser: TeamMemberAccount | null;
+  currentUser: AppUser | null;
+  token: string | null;
   isAuthenticated: boolean;
-  login: (identifier: string, password: string) => { success: boolean; error?: string };
+  needsSetup: boolean;
+  configuredByEnv: boolean;
+  isAuthLoading: boolean;
+  login: (identifier: string, password: string) => Promise<AuthActionResult>;
+  claimInitialAdmin: (input: ClaimAdminInput) => Promise<AuthActionResult>;
   logout: () => void;
   hasRole: (roles: UserRole[]) => boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-const AUTH_STORAGE_KEY = 'cibertec_helpdesk_auth_member';
-
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<TeamMemberAccount | null>(() => {
-    try {
-      const saved = sessionStorage.getItem(AUTH_STORAGE_KEY);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const found = TEAM_MEMBERS.find((u) => u.id === parsed.id);
-        if (found) return found;
-      }
-    } catch {
-      // fallback
-    }
-    return null;
-  });
+  // La sesión y el token se mantienen exclusivamente en memoria del estado React
+  const [currentUser, setCurrentUser] = useState<AppUser | null>(null);
+  const [token, setToken] = useState<string | null>(null);
+  const [needsSetup, setNeedsSetup] = useState<boolean>(false);
+  const [configuredByEnv, setConfiguredByEnv] = useState<boolean>(false);
+  const [isAuthLoading, setIsAuthLoading] = useState<boolean>(true);
 
   useEffect(() => {
-    if (currentUser) {
-      sessionStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(currentUser));
-    } else {
-      sessionStorage.removeItem(AUTH_STORAGE_KEY);
-      localStorage.removeItem(AUTH_STORAGE_KEY);
-    }
-  }, [currentUser]);
+    let active = true;
+    const fetchStatus = async () => {
+      try {
+        const res = await fetch('/api/auth/status');
+        if (res.ok && active) {
+          const data = await res.json();
+          setNeedsSetup(Boolean(data.needsSetup));
+          setConfiguredByEnv(Boolean(data.configuredByEnv));
+        }
+      } catch {
+        // Fallback silencioso si el servidor aún está iniciando
+      } finally {
+        if (active) setIsAuthLoading(false);
+      }
+    };
+    fetchStatus();
+    return () => {
+      active = false;
+    };
+  }, []);
 
-  const login = (identifier: string, password: string): { success: boolean; error?: string } => {
-    const cleanId = identifier.trim().toLowerCase();
+  const login = async (identifier: string, password: string): Promise<AuthActionResult> => {
+    const cleanId = identifier.trim();
     const cleanPass = password.trim();
 
     if (!cleanId) {
@@ -116,32 +69,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, error: 'Por favor ingrese su contraseña.' };
     }
 
-    const member = TEAM_MEMBERS.find(
-      (m) =>
-        m.username.toLowerCase() === cleanId ||
-        m.email.toLowerCase() === cleanId
-    );
-
-    if (!member) {
+    try {
+      const res = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: cleanId, password: cleanPass }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.user || !data.token) {
+        return {
+          success: false,
+          error: data.error || 'Usuario o contraseña incorrectos.',
+        };
+      }
+      setCurrentUser(data.user);
+      setToken(data.token);
+      setNeedsSetup(false);
+      return { success: true };
+    } catch {
       return {
         success: false,
-        error: 'Usuario no registrado. Utilice las credenciales oficiales de los 4 miembros del proyecto.',
+        error: 'No se pudo conectar con el servicio de autenticación del servidor.',
       };
     }
+  };
 
-    if (member.password !== cleanPass) {
+  const claimInitialAdmin = async (input: ClaimAdminInput): Promise<AuthActionResult> => {
+    try {
+      const res = await fetch('/api/auth/bootstrap', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(input),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success || !data.user || !data.token) {
+        return {
+          success: false,
+          error: data.error || 'No se pudo registrar la cuenta administradora inicial.',
+        };
+      }
+      setCurrentUser(data.user);
+      setToken(data.token);
+      setNeedsSetup(false);
+      return { success: true };
+    } catch {
       return {
         success: false,
-        error: 'Contraseña incorrecta. Verifique sus credenciales institucionales.',
+        error: 'Error de red al configurar la cuenta inicial.',
       };
     }
-
-    setCurrentUser(member);
-    return { success: true };
   };
 
   const logout = () => {
     setCurrentUser(null);
+    setToken(null);
   };
 
   const hasRole = (roles: UserRole[]): boolean => {
@@ -153,8 +134,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         currentUser,
-        isAuthenticated: !!currentUser,
+        token,
+        isAuthenticated: !!currentUser && !!token,
+        needsSetup,
+        configuredByEnv,
+        isAuthLoading,
         login,
+        claimInitialAdmin,
         logout,
         hasRole,
       }}
