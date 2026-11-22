@@ -15,9 +15,9 @@ import {
   listUsersForAdmin,
   UserRole,
   verifyBearerToken,
-} from './api/_auth';
-import { aggregateHostsFromWebhookTickets } from './api/_hosts';
-import { getMonitoringRules, saveMonitoringRules } from './api/_rules';
+} from './api/_auth.js';
+import { aggregateHostsFromWebhookTickets } from './api/_hosts.js';
+import { getMonitoringRules, saveMonitoringRules } from './api/_rules.js';
 
 const require = createRequire(import.meta.url);
 const { ZipArchive } = require('archiver');

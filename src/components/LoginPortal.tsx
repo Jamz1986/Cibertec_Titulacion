@@ -20,7 +20,6 @@ import {
 export const LoginPortal: React.FC = () => {
   const { login, claimInitialAdmin, needsSetup, isAuthLoading } = useAuth();
   const [identifier, setIdentifier] = useState('');
-  const [fullName, setFullName] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
@@ -35,7 +34,6 @@ export const LoginPortal: React.FC = () => {
       const result = needsSetup
         ? await claimInitialAdmin({
             username: identifier,
-            nombre: fullName || identifier,
             password,
           })
         : await login(identifier, password);
@@ -170,21 +168,6 @@ export const LoginPortal: React.FC = () => {
                     <div className="p-3 rounded-xl bg-rose-950/60 border border-rose-800/60 text-rose-300 text-xs flex items-center gap-2">
                       <Info className="w-4 h-4 shrink-0" />
                       <span>{loginError}</span>
-                    </div>
-                  )}
-
-                  {needsSetup && (
-                    <div>
-                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                        Nombre Completo (Coordinador / Admin)
-                      </label>
-                      <input
-                        type="text"
-                        value={fullName}
-                        onChange={(e) => setFullName(e.target.value)}
-                        placeholder="Ej. Coordinador TI"
-                        className="w-full bg-slate-950 border border-slate-800 focus:border-indigo-500 rounded-xl px-3 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-hidden transition-colors"
-                      />
                     </div>
                   )}
 

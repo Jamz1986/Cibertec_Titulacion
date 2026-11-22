@@ -1,9 +1,9 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import fs from 'fs';
 import path from 'path';
-import { verifyBearerToken } from '../_auth';
-import { aggregateHostsFromWebhookTickets } from '../_hosts';
-import { getMonitoringRules, saveMonitoringRules } from '../_rules';
+import { verifyBearerToken } from '../_auth.js';
+import { aggregateHostsFromWebhookTickets } from '../_hosts.js';
+import { getMonitoringRules, saveMonitoringRules } from '../_rules.js';
 
 const CACHE_FILE = path.join('/tmp', 'zabbix_tickets_cache.json');
 

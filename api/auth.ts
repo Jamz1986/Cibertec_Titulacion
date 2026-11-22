@@ -8,7 +8,7 @@ import {
   listUsersForAdmin,
   UserRole,
   verifyBearerToken,
-} from './_auth';
+} from './_auth.js';
 
 export default function handler(req: VercelRequest, res: VercelResponse) {
   const url = String(req.url || '');
