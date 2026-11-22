@@ -187,11 +187,23 @@ function saveBootstrapAccounts(accounts: StoredAccount[]) {
 
 function getAllActiveAccounts(): { accounts: StoredAccount[]; configuredByEnv: boolean } {
   const envAccounts = loadEnvAccounts();
-  if (envAccounts.length > 0) {
-    // Configured process.env accounts take precedence; optionally include non-conflicting bootstrap accounts
-    return { accounts: envAccounts, configuredByEnv: true };
+  const bootstrapAccounts = loadBootstrapAccounts();
+  if (envAccounts.length === 0) {
+    return { accounts: bootstrapAccounts, configuredByEnv: false };
   }
-  return { accounts: loadBootstrapAccounts(), configuredByEnv: false };
+  // Merge env accounts with runtime-created accounts (env takes precedence on conflicts)
+  const seen = new Set(
+    envAccounts.flatMap((a) => [a.username.toLowerCase(), a.email.toLowerCase()])
+  );
+  const merged = [...envAccounts];
+  for (const acc of bootstrapAccounts) {
+    if (!seen.has(acc.username.toLowerCase()) && !seen.has(acc.email.toLowerCase())) {
+      merged.push(acc);
+      seen.add(acc.username.toLowerCase());
+      seen.add(acc.email.toLowerCase());
+    }
+  }
+  return { accounts: merged, configuredByEnv: true };
 }
 
 export function getAuthStatus() {
@@ -200,6 +212,83 @@ export function getAuthStatus() {
     needsSetup: accounts.length === 0,
     configuredByEnv,
     accountCount: accounts.length,
+  };
+}
+
+export function listUsersForAdmin(): Array<PublicUser & { username: string; source: 'env' | 'runtime' }> {
+  const envAccounts = loadEnvAccounts();
+  const envIds = new Set(envAccounts.map((a) => a.id));
+  const { accounts } = getAllActiveAccounts();
+  return accounts.map((a) => ({
+    ...toPublicUser(a),
+    username: a.username,
+    source: envIds.has(a.id) ? 'env' : 'runtime',
+  }));
+}
+
+export function createUserByAdmin(input: {
+  username: string;
+  nombre?: string;
+  email?: string;
+  rol: UserRole;
+  password: string;
+}): { success: boolean; error?: string; user?: PublicUser & { username: string } } {
+  const username = String(input.username || '').trim();
+  const password = String(input.password || '').trim();
+  const rol = String(input.rol || 'TECNICO').toUpperCase() as UserRole;
+
+  if (username.length < 3) {
+    return { success: false, error: 'El usuario debe tener al menos 3 caracteres.' };
+  }
+  if (password.length < 6) {
+    return { success: false, error: 'La contraseña debe tener al menos 6 caracteres.' };
+  }
+  if (!['ADMIN', 'TECNICO', 'DOCENTE', 'ALUMNO'].includes(rol)) {
+    return { success: false, error: 'Rol inválido. Debe ser ADMIN, TECNICO, DOCENTE o ALUMNO.' };
+  }
+
+  const email =
+    String(input.email || '').trim() ||
+    (username.includes('@') ? username : `${username}@edudesk.edu.pe`);
+  const nombre = String(input.nombre || '').trim() || username;
+
+  const { accounts } = getAllActiveAccounts();
+  const exists = accounts.some(
+    (a) =>
+      a.username.toLowerCase() === username.toLowerCase() ||
+      a.email.toLowerCase() === email.toLowerCase()
+  );
+  if (exists) {
+    return { success: false, error: 'Ya existe una cuenta registrada con ese usuario o correo.' };
+  }
+
+  const meta = defaultRoleMeta(rol);
+  const { salt, hash } = hashPassword(password);
+  const newAccount: StoredAccount = {
+    id: `usr-${rol.toLowerCase()}-${Date.now()}`,
+    username,
+    email,
+    nombre,
+    rol,
+    rolLabel: meta.rolLabel,
+    institucionSede: meta.institucionSede,
+    ugel: 'Mesa de Ayuda',
+    departamento: meta.departamento,
+    cargo: meta.cargo,
+    salt,
+    passwordHash: hash,
+  };
+
+  const currentRuntime = loadBootstrapAccounts();
+  currentRuntime.push(newAccount);
+  saveBootstrapAccounts(currentRuntime);
+
+  return {
+    success: true,
+    user: {
+      ...toPublicUser(newAccount),
+      username: newAccount.username,
+    },
   };
 }
 

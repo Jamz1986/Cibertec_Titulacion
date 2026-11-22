@@ -18,8 +18,16 @@
       "destination": "/api/auth?action=me"
     },
     {
+      "source": "/api/auth/users",
+      "destination": "/api/auth?action=users"
+    },
+    {
       "source": "/api/technicians",
       "destination": "/api/auth?action=technicians"
+    },
+    {
+      "source": "/api/monitoring-rules",
+      "destination": "/api/webhooks/zabbix?action=rules"
     },
     {
       "source": "/api/hosts",

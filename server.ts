@@ -9,11 +9,15 @@ import util from 'util';
 import {
   authenticateUser,
   claimInitialAdmin,
+  createUserByAdmin,
   getAuthStatus,
   getPublicTechnicians,
+  listUsersForAdmin,
+  UserRole,
   verifyBearerToken,
 } from './api/_auth';
 import { aggregateHostsFromWebhookTickets } from './api/_hosts';
+import { getMonitoringRules, saveMonitoringRules } from './api/_rules';
 
 const require = createRequire(import.meta.url);
 const { ZipArchive } = require('archiver');
@@ -387,8 +391,11 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         return false;
       });
 
+      const rulesConfig = getMonitoringRules();
+      const findRule = (id: string) => rulesConfig.rules.find((r) => r.id === id);
+
       if (estadoEvento === 'RESOLVED') {
-        if (matchingIndex !== -1) {
+        if (matchingIndex !== -1 && rulesConfig.autoResolverConOk) {
           const existing = receivedTickets[matchingIndex];
           existing.status = 'resolved';
           existing.estadoEvento = 'RESOLVED';
@@ -430,11 +437,13 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         return res.status(200).json({
           status: 'success',
           resolved: true,
-          message: 'Evento RESOLVED procesado (sin ticket abierto pendiente).',
+          message: rulesConfig.autoResolverConOk
+            ? 'Evento RESOLVED procesado (sin ticket abierto pendiente).'
+            : 'Evento RESOLVED recibido (cierre automático deshabilitado por regla de monitoreo).',
         });
       }
 
-      if (matchingIndex !== -1) {
+      if (matchingIndex !== -1 && rulesConfig.deduplicarAlertas) {
         const existing = receivedTickets[matchingIndex];
         existing.valorActual = itemValue;
         existing.horaIncidenciaVM = timeSync.timeOnly;
@@ -507,7 +516,7 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
       let casoNombre: string | undefined = undefined;
       let computedTitle = '';
       let defaultMensajeFalla = '';
-      const computedPriority: 'urgent' | 'high' | 'medium' | 'low' =
+      let computedPriority: 'urgent' | 'high' | 'medium' | 'low' =
         mapZabbixSeverityToPriority(severity);
       let computedTipoFalla:
         | 'Red y Conectividad'
@@ -515,6 +524,7 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         | 'Servidor y Servicios'
         | 'Suministro Eléctrico'
         | 'Software Educativo' = 'Hardware Aula / AIP';
+      let matchedRuleId: 'cpu_overload' | 'ram_saturation' | 'network_disconnect' | 'agent_service_down' | null = null;
 
       if (
         normEvent.includes('ram') ||
@@ -525,9 +535,12 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         normEvent.includes('>85') ||
         normEvent.includes('umbral del 85')
       ) {
-        // Caso 4: Saturación de Memoria RAM (>85%)
+        // Caso 4: Saturación de Memoria RAM (> umbral configurado)
+        matchedRuleId = 'ram_saturation';
+        const ramRule = findRule('ram_saturation');
+        const ramUmbral = ramRule?.umbral ?? 85;
         casoNumero = 4;
-        casoNombre = 'Caso 4: Saturación de Memoria RAM (>85%)';
+        casoNombre = `Caso 4: Saturación de Memoria RAM (>${ramUmbral}%)`;
         const cleanedEvent = cleanTitlePrefix(eventName);
         if (
           cleanedEvent &&
@@ -539,9 +552,9 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
             ? cleanedEvent
             : `${cleanedEvent} · ${hostName}`;
         } else {
-          computedTitle = `Saturación Crítica de Memoria RAM (>85%) · ${hostName}`;
+          computedTitle = `Saturación Crítica de Memoria RAM (>${ramUmbral}%) · ${hostName}`;
         }
-        defaultMensajeFalla = `Consumo de memoria RAM supera el umbral crítico del 85% en ${hostName}.`;
+        defaultMensajeFalla = `Consumo de memoria RAM supera el umbral crítico del ${ramUmbral}% en ${hostName}.`;
         computedTipoFalla = 'Hardware Aula / AIP';
       } else if (
         normEvent.includes('link down') ||
@@ -556,6 +569,7 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         normEvent.includes('30s')
       ) {
         // Caso 1: Desconexión Física de Red (Disponibilidad / Red)
+        matchedRuleId = 'network_disconnect';
         casoNumero = 1;
         casoNombre = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
         const cleanedEvent = cleanTitlePrefix(eventName);
@@ -578,9 +592,12 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         normEvent.includes('sobrecarga')
       ) {
         // Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)
+        matchedRuleId = 'cpu_overload';
+        const cpuRule = findRule('cpu_overload');
+        const cpuUmbral = cpuRule?.umbral ?? 95;
         casoNumero = 2;
         casoNombre = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
-        computedTitle = `Sobrecarga Crítica de Procesador CPU (>95%) · ${hostName}`;
+        computedTitle = `Sobrecarga Crítica de Procesador CPU (>${cpuUmbral}%) · ${hostName}`;
         defaultMensajeFalla = `Saturación crítica de CPU en ${hostName}. El monitoreo advierte la saturación antes de que el equipo colapse.`;
         computedTipoFalla = 'Hardware Aula / AIP';
       } else if (
@@ -591,6 +608,7 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
         normEvent.includes('agent service')
       ) {
         // Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)
+        matchedRuleId = 'agent_service_down';
         casoNumero = 3;
         casoNombre = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
         computedTitle = `Interrupción de Servicio Crítico del Agente de Monitoreo · ${hostName}`;
@@ -612,6 +630,20 @@ function handleZabbixWebhook(req: express.Request, res: express.Response) {
           hostName.toLowerCase().includes('router')
             ? 'Red y Conectividad'
             : 'Hardware Aula / AIP';
+      }
+
+      if (matchedRuleId) {
+        const activeRule = findRule(matchedRuleId);
+        if (activeRule && !activeRule.habilitada) {
+          return res.status(200).json({
+            status: 'success',
+            ignoredByRule: true,
+            message: `Evento recibido pero omitido porque la regla "${activeRule.nombre}" está deshabilitada por el administrador.`,
+          });
+        }
+        if (activeRule && rulesConfig.updatedBy !== 'Sistema EduDesk') {
+          computedPriority = activeRule.prioridad;
+        }
       }
 
       // Regla de descripción recomendada:
@@ -857,12 +889,71 @@ app.get('/api/auth/me', (req, res) => {
   return res.json({ success: true, user });
 });
 
+app.get('/api/auth/users', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  if (user.rol !== 'ADMIN') {
+    return res.status(403).json({ success: false, error: 'Solo el administrador puede gestionar usuarios.' });
+  }
+  return res.json({ success: true, users: listUsersForAdmin() });
+});
+
+app.post('/api/auth/users', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  if (user.rol !== 'ADMIN') {
+    return res.status(403).json({ success: false, error: 'Solo el administrador puede crear cuentas.' });
+  }
+  const result = createUserByAdmin({
+    username: req.body?.username,
+    nombre: req.body?.nombre,
+    email: req.body?.email,
+    rol: req.body?.rol as UserRole,
+    password: req.body?.password,
+  });
+  return res.status(result.success ? 200 : 400).json(result);
+});
+
 app.get('/api/technicians', (req, res) => {
   const user = verifyBearerToken(req.headers.authorization);
   if (!user) {
     return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
   }
   return res.json({ success: true, technicians: getPublicTechnicians() });
+});
+
+// Configurar Reglas de Monitoreo (solo ADMIN)
+app.get('/api/monitoring-rules', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  if (user.rol !== 'ADMIN') {
+    return res.status(403).json({
+      success: false,
+      error: 'Solo el administrador puede consultar o configurar las reglas de monitoreo.',
+    });
+  }
+  return res.json({ success: true, config: getMonitoringRules() });
+});
+
+app.put('/api/monitoring-rules', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  if (user.rol !== 'ADMIN') {
+    return res.status(403).json({
+      success: false,
+      error: 'Solo el administrador puede modificar las reglas de monitoreo.',
+    });
+  }
+  const result = saveMonitoringRules(req.body || {}, user.nombre);
+  return res.status(result.success ? 200 : 400).json(result);
 });
 
 // CU-10: Monitorear estado de red y equipos (solo ADMIN y TECNICO)
@@ -965,15 +1056,22 @@ app.patch('/api/tickets/:id/assign', (req, res) => {
   });
   const timeStr = `${formatter.format(new Date())} (GMT-5)`;
 
+  const prevStatus = cache[idx].status;
   cache[idx].asignadoA = asignadoA;
   cache[idx].assignedTechnician = asignadoA;
+  if (prevStatus === 'open') {
+    cache[idx].status = 'in_progress';
+  }
   cache[idx].comments = [
     ...(cache[idx].comments || []),
     {
       id: `c-assign-${Date.now()}`,
       author: user.nombre,
       role: 'Coordinador / Admin',
-      text: `Ticket asignado al técnico: ${asignadoA}.`,
+      text:
+        prevStatus === 'open'
+          ? `Ticket asignado al técnico: ${asignadoA}. Estado actualizado automáticamente a "En Progreso".`
+          : `Ticket asignado al técnico: ${asignadoA}.`,
       timestamp: timeStr,
     },
   ];

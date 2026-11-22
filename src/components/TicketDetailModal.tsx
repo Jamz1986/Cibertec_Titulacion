@@ -56,6 +56,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
   const [showPriorityEditor, setShowPriorityEditor] = useState(false);
   const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
   const [serverTechnicians, setServerTechnicians] = useState<string[]>([]);
+  const [assignmentConfirmedTo, setAssignmentConfirmedTo] = useState<string | null>(null);
 
   useEffect(() => {
     setCommentAuthor(currentUser?.nombre || 'Especialista TI');
@@ -64,6 +65,7 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
   useEffect(() => {
     setResolutionNote(ticket?.resolutionNotes || '');
     setShowPriorityEditor(false);
+    setAssignmentConfirmedTo(null);
   }, [ticket?.id, ticket?.resolutionNotes]);
 
   useEffect(() => {
@@ -177,9 +179,12 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
       hour12: false,
     });
     const timestamp = `${formatter.format(new Date())} (GMT-5)`;
+    const shouldMoveToInProgress = Boolean(cleanTech) && ticket.status === 'open';
+    const nextStatus: TicketStatus = shouldMoveToInProgress ? 'in_progress' : ticket.status;
 
     const updated: Ticket = {
       ...ticket,
+      status: nextStatus,
       asignadoA: cleanTech || undefined,
       assignedTechnician: cleanTech || undefined,
       comments: [
@@ -189,13 +194,16 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
           author: currentUser?.nombre || 'Coordinador / Admin',
           role: 'Coordinador / Admin',
           text: cleanTech
-            ? `Ticket asignado al técnico: ${cleanTech}.`
+            ? shouldMoveToInProgress
+              ? `Ticket asignado al técnico: ${cleanTech}. Estado actualizado automáticamente a "En Progreso".`
+              : `Ticket asignado al técnico: ${cleanTech}.`
             : 'Asignación de técnico removida.',
           timestamp,
         },
       ],
     };
     onUpdateTicket(updated);
+    setAssignmentConfirmedTo(cleanTech || null);
 
     if (cleanTech && token) {
       try {
@@ -464,6 +472,90 @@ export const TicketDetailModal: React.FC<TicketDetailModalProps> = ({
         {/* Tab 1: Info */}
         {activeTab === 'info' && (
           <div className="p-6 space-y-6 max-h-[65vh] overflow-y-auto">
+            {/* Flujo Continuo de Asignación y Atención (Solo Coordinador / ADMIN) */}
+            {isCoordinator && (
+              <div className="p-4 rounded-2xl border-2 border-indigo-200 dark:border-indigo-900/60 bg-gradient-to-r from-indigo-50/70 via-white to-slate-50 dark:from-indigo-950/30 dark:via-slate-900 dark:to-slate-900 space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <div className="w-7 h-7 rounded-lg bg-indigo-600 text-white flex items-center justify-center">
+                      <UserCheck className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h4 className="text-xs font-bold text-slate-900 dark:text-white">
+                        CU-07 · Asignación y Flujo Continuo de Atención
+                      </h4>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                        Asigne un técnico responsable y continúe inmediatamente con el diagnóstico o resolución.
+                      </p>
+                    </div>
+                  </div>
+                  <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded bg-indigo-100 text-indigo-800 dark:bg-indigo-950 dark:text-indigo-300">
+                    {ticket.asignadoA || ticket.assignedTechnician
+                      ? `Responsable: ${ticket.asignadoA || ticket.assignedTechnician}`
+                      : 'Pendiente de asignación'}
+                  </span>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                  <select
+                    value={ticket.asignadoA || ticket.assignedTechnician || ''}
+                    onChange={(e) => handleAssignTechnician(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-lg border border-slate-300 dark:border-slate-700 bg-white dark:bg-slate-800 text-xs font-semibold text-slate-900 dark:text-white cursor-pointer"
+                  >
+                    <option value="">-- Seleccionar Técnico TI --</option>
+                    {mergedTechnicians.map((techName) => (
+                      <option key={techName} value={techName}>
+                        {techName}
+                      </option>
+                    ))}
+                  </select>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('comments')}
+                      className="px-3 py-2 rounded-lg bg-slate-900 dark:bg-white text-white dark:text-slate-900 text-xs font-semibold hover:bg-slate-800 dark:hover:bg-slate-100 transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Agregar Diagnóstico</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('vmware_test')}
+                      className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                    >
+                      <Play className="w-3.5 h-3.5" />
+                      <span>Prueba VMware</span>
+                    </button>
+                    {ticket.status !== 'resolved' && ticket.status !== 'closed' && (
+                      <button
+                        type="button"
+                        onClick={() => handleStatusChange('resolved')}
+                        className="px-3 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-semibold transition-colors cursor-pointer inline-flex items-center gap-1.5"
+                      >
+                        <CheckCircle2 className="w-3.5 h-3.5" />
+                        <span>Marcar Resuelto</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {assignmentConfirmedTo && (
+                  <div className="p-2.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-[11px] flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-semibold flex items-center gap-1.5">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>
+                        Asignación confirmada para <strong>{assignmentConfirmedTo}</strong> · Ticket activo en atención ({ticket.status === 'in_progress' ? 'En Progreso' : ticket.status}).
+                      </span>
+                    </span>
+                    <span className="text-[10px] font-mono text-emerald-700 dark:text-emerald-300">
+                      Registrado en historial
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Escenario de Incidencia */}
             {ticket.casoNumero && (
               <div className="p-4 rounded-2xl bg-gradient-to-r from-indigo-50 via-purple-50 to-indigo-50 dark:from-indigo-950/40 dark:via-purple-950/30 dark:to-indigo-950/40 border-2 border-indigo-300 dark:border-indigo-800 space-y-2.5 shadow-xs">

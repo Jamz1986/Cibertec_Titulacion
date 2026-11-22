@@ -56,20 +56,33 @@ import { ZabbixConnectionModal } from './components/ZabbixConnectionModal';
 import { FAQSection } from './components/FAQSection';
 import { DistrictFailureDashboard } from './components/DistrictFailureDashboard';
 import { HostMonitorView } from './components/HostMonitorView';
+import { AssignedTicketsView } from './components/AssignedTicketsView';
+import { MonitoringRulesView } from './components/MonitoringRulesView';
 import { cleanAndEnrichTicket } from './utils/ticketCleaner';
 
 export default function App() {
-  const { currentUser, token, logout, hasRole } = useAuth();
+  const { currentUser, token, logout } = useAuth();
   const [isShareModalOpen, setIsShareModalOpen] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isZabbixModalOpen, setIsZabbixModalOpen] = useState(false);
+  const [techniciansRefreshKey, setTechniciansRefreshKey] = useState(0);
   const isGeneralUser = currentUser?.rol === 'DOCENTE' || currentUser?.rol === 'ALUMNO';
   const isTechnician = currentUser?.rol === 'TECNICO';
   const isAdmin = currentUser?.rol === 'ADMIN';
   const isTechOrAdmin = isTechnician || isAdmin;
 
   const [activeSection, setActiveSection] = useState<
-    'tickets' | 'hosts' | 'packet-tracer' | 'siniestros' | 'distritos-report' | 'priorities' | 'thesis' | 'architecture' | 'faq'
+    | 'tickets'
+    | 'assigned'
+    | 'hosts'
+    | 'monitoring-rules'
+    | 'packet-tracer'
+    | 'siniestros'
+    | 'distritos-report'
+    | 'priorities'
+    | 'thesis'
+    | 'architecture'
+    | 'faq'
   >('tickets');
 
   const alertSoundIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -144,7 +157,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [token, isTechOrAdmin]);
+  }, [token, isTechOrAdmin, techniciansRefreshKey]);
 
   const [tickets, setTickets] = useState<Ticket[]>(() => {
     try {
@@ -191,13 +204,33 @@ export default function App() {
     return Array.from(set);
   }, [serverTechnicians, tickets]);
 
+  const assignedToMeCount = useMemo(() => {
+    if (!currentUser || !isTechOrAdmin) return 0;
+    const norm = (v?: string) => (v || '').trim().toLowerCase();
+    const myName = norm(currentUser.nombre);
+    if (!myName) return 0;
+    return tickets.filter((t) => {
+      const assigned = norm(t.asignadoA || t.assignedTechnician);
+      if (!assigned) return false;
+      return assigned === myName || assigned.includes(myName) || myName.includes(assigned);
+    }).length;
+  }, [tickets, currentUser, isTechOrAdmin]);
+
   // When switching role, align default view, alert state, and filtering
   React.useEffect(() => {
     setOnlyMyTickets(isGeneralUser);
+    if (!isAdmin && activeSection === 'monitoring-rules') {
+      setActiveSection('tickets');
+    }
     if (!isTechOrAdmin) {
       stopAlertSound();
       setLatestZabbixAlert(null);
-      if (activeSection === 'thesis' || activeSection === 'hosts') {
+      if (
+        activeSection === 'thesis' ||
+        activeSection === 'hosts' ||
+        activeSection === 'assigned' ||
+        activeSection === 'monitoring-rules'
+      ) {
         setActiveSection('tickets');
       }
     }
@@ -400,7 +433,7 @@ export default function App() {
   };
 
   const handleUpdateTicket = (updated: Ticket) => {
-    setTickets(tickets.map((t) => (t.id === updated.id ? updated : t)));
+    setTickets((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
     setSelectedTicket(updated);
   };
 
@@ -651,21 +684,33 @@ export default function App() {
             </button>
           </div>
 
-          {/* Telemetry Status badge & connection helper */}
-          <button
-            type="button"
-            onClick={() => setIsZabbixModalOpen(true)}
-            title="Ver URL y configuración para conectar Zabbix en VMware"
-            className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 text-[11px] text-emerald-800 transition-colors cursor-pointer text-left"
-          >
-            <div className="flex items-center gap-2">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
-              <span className="font-semibold">Telemetría Zabbix</span>
+          {/* Telemetry Status badge & connection helper (Configurar solo ADMIN) */}
+          {isAdmin ? (
+            <button
+              type="button"
+              onClick={() => setIsZabbixModalOpen(true)}
+              title="Ver URL y configuración para conectar Zabbix en VMware"
+              className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 border border-emerald-200/80 text-[11px] text-emerald-800 transition-colors cursor-pointer text-left"
+            >
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className="font-semibold">Telemetría Zabbix</span>
+              </div>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-900 font-mono">
+                Configurar
+              </span>
+            </button>
+          ) : (
+            <div className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200/80 text-[11px] text-emerald-800">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse shrink-0" />
+                <span className="font-semibold">Telemetría Zabbix</span>
+              </div>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-800 font-mono">
+                Activo
+              </span>
             </div>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-200 text-emerald-900 font-mono">
-              Configurar 📡
-            </span>
-          </button>
+          )}
 
           {/* Primary Action Button */}
           <button
@@ -707,6 +752,34 @@ export default function App() {
           {(isAdmin || isTechnician) && (
             <button
               onClick={() => {
+                setActiveSection('assigned');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+                activeSection === 'assigned'
+                  ? 'bg-indigo-50 text-indigo-700 font-bold border border-indigo-200/70'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <UserCheck className="w-4 h-4 text-indigo-600" />
+                <span>Mis Tickets Asignados</span>
+              </div>
+              <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                activeSection === 'assigned'
+                  ? 'bg-indigo-200 text-indigo-900'
+                  : assignedToMeCount > 0
+                  ? 'bg-amber-100 text-amber-800'
+                  : 'bg-slate-100 text-slate-600'
+              }`}>
+                {assignedToMeCount}
+              </span>
+            </button>
+          )}
+
+          {(isAdmin || isTechnician) && (
+            <button
+              onClick={() => {
                 setActiveSection('hosts');
                 setIsMobileMenuOpen(false);
               }}
@@ -722,6 +795,28 @@ export default function App() {
               </div>
               <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-800">
                 En vivo
+              </span>
+            </button>
+          )}
+
+          {isAdmin && (
+            <button
+              onClick={() => {
+                setActiveSection('monitoring-rules');
+                setIsMobileMenuOpen(false);
+              }}
+              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+                activeSection === 'monitoring-rules'
+                  ? 'bg-rose-50 text-rose-700 font-bold border border-rose-200/70'
+                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+              }`}
+            >
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-rose-600" />
+                <span>Reglas de Monitoreo</span>
+              </div>
+              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
+                Admin
               </span>
             </button>
           )}
@@ -1500,11 +1595,29 @@ export default function App() {
             </div>
           )}
 
+          {/* Section: Mis Tickets Asignados (TECNICO y ADMIN) */}
+          {activeSection === 'assigned' && (isAdmin || isTechnician) && currentUser && (
+            <AssignedTicketsView
+              currentUserName={currentUser.nombre}
+              tickets={tickets}
+              onSelectTicket={(t) => setSelectedTicket(t)}
+              onGoToAllTickets={() => setActiveSection('tickets')}
+            />
+          )}
+
           {/* Section: CU-10 Red y Equipos (solo ADMIN y TECNICO) */}
           {activeSection === 'hosts' && (isAdmin || isTechnician) && (
             <HostMonitorView
               token={token}
               onSelectTicket={(t) => setSelectedTicket(t)}
+            />
+          )}
+
+          {/* Section: Configurar Reglas de Monitoreo (estrictamente solo ADMIN) */}
+          {activeSection === 'monitoring-rules' && isAdmin && (
+            <MonitoringRulesView
+              token={token}
+              onOpenZabbixGuide={() => setIsZabbixModalOpen(true)}
             />
           )}
 
@@ -1706,6 +1819,7 @@ export default function App() {
       <ShareDeployModal
         isOpen={isShareModalOpen}
         onClose={() => setIsShareModalOpen(false)}
+        onUsersChanged={() => setTechniciansRefreshKey((k) => k + 1)}
       />
 
       {/* Emergency Telephone Console for Administrator */}

@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { verifyBearerToken } from '../_auth';
 import { aggregateHostsFromWebhookTickets } from '../_hosts';
+import { getMonitoringRules, saveMonitoringRules } from '../_rules';
 
 const CACHE_FILE = path.join('/tmp', 'zabbix_tickets_cache.json');
 
@@ -98,7 +99,7 @@ function mapZabbixSeverityToPriority(severity?: string): 'low' | 'medium' | 'hig
 export default function handler(req: VercelRequest, res: VercelResponse) {
   const action = String(req.query?.action || '').trim();
   const isAuthProtectedAction =
-    action === 'hosts' || action === 'acknowledge' || action === 'assign';
+    action === 'hosts' || action === 'acknowledge' || action === 'assign' || action === 'rules';
 
   if (!isAuthProtectedAction) {
     setPublicWebhookCors(res);
@@ -106,6 +107,26 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
+  }
+
+  // Configurar Reglas de Monitoreo (solo ADMIN)
+  if (action === 'rules' && (req.method === 'GET' || req.method === 'PUT')) {
+    const user = verifyBearerToken(req.headers.authorization as string | undefined);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+    }
+    if (user.rol !== 'ADMIN') {
+      return res.status(403).json({
+        success: false,
+        error: 'Solo el administrador puede configurar las reglas de monitoreo.',
+      });
+    }
+    if (req.method === 'GET') {
+      return res.status(200).json({ success: true, config: getMonitoringRules() });
+    }
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    const result = saveMonitoringRules(body, user.nombre);
+    return res.status(result.success ? 200 : 400).json(result);
   }
 
   // CU-10: GET /api/hosts (solo ADMIN y TECNICO)
@@ -175,15 +196,22 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     if (idx === -1) {
       return res.status(404).json({ success: false, error: 'Ticket no encontrado en caché del servidor.' });
     }
+    const prevStatus = cache[idx].status;
     cache[idx].asignadoA = asignadoA;
     cache[idx].assignedTechnician = asignadoA;
+    if (prevStatus === 'open') {
+      cache[idx].status = 'in_progress';
+    }
     cache[idx].comments = [
       ...(cache[idx].comments || []),
       {
         id: `c-assign-${Date.now()}`,
         author: user.nombre,
         role: 'Coordinador / Admin',
-        text: `Ticket asignado al técnico: ${asignadoA}.`,
+        text:
+          prevStatus === 'open'
+            ? `Ticket asignado al técnico: ${asignadoA}. Estado actualizado automáticamente a "En Progreso".`
+            : `Ticket asignado al técnico: ${asignadoA}.`,
         timestamp: formatPeruDateTime(false),
       },
     ];
@@ -413,8 +441,11 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         return false;
       });
 
+      const rulesConfig = getMonitoringRules();
+      const findRule = (id: string) => rulesConfig.rules.find((r) => r.id === id);
+
       if (estadoEvento === 'RESOLVED') {
-        if (matchingIndex !== -1) {
+        if (matchingIndex !== -1 && rulesConfig.autoResolverConOk) {
           const existing = current[matchingIndex];
           existing.status = 'resolved';
           existing.estadoEvento = 'RESOLVED';
@@ -443,11 +474,13 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(200).json({
           status: 'success',
           resolved: true,
-          message: 'Evento RESOLVED procesado (sin ticket abierto pendiente).',
+          message: rulesConfig.autoResolverConOk
+            ? 'Evento RESOLVED procesado (sin ticket abierto pendiente).'
+            : 'Evento RESOLVED recibido (cierre automático deshabilitado por regla de monitoreo).',
         });
       }
 
-      if (matchingIndex !== -1) {
+      if (matchingIndex !== -1 && rulesConfig.deduplicarAlertas) {
         const existing = current[matchingIndex];
         existing.valorActual = itemValue;
         existing.horaIncidenciaVM = timeSync.timeOnly;
@@ -501,11 +534,12 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       let casoNombre: string | undefined = undefined;
       let computedTitle = '';
       let defaultMensajeFalla = '';
-      const computedPriority = mapZabbixSeverityToPriority(severity);
+      let computedPriority = mapZabbixSeverityToPriority(severity);
       let computedTipoFalla:
         | 'Red y Conectividad'
         | 'Hardware Aula / AIP'
         | 'Servidor y Servicios' = 'Hardware Aula / AIP';
+      let matchedRuleId: 'cpu_overload' | 'ram_saturation' | 'network_disconnect' | 'agent_service_down' | null = null;
 
       if (
         normEvent.includes('ram') ||
@@ -516,8 +550,11 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         normEvent.includes('>85') ||
         normEvent.includes('umbral del 85')
       ) {
+        matchedRuleId = 'ram_saturation';
+        const ramRule = findRule('ram_saturation');
+        const ramUmbral = ramRule?.umbral ?? 85;
         casoNumero = 4;
-        casoNombre = 'Caso 4: Saturación de Memoria RAM (>85%)';
+        casoNombre = `Caso 4: Saturación de Memoria RAM (>${ramUmbral}%)`;
         const cleanedEvent = cleanTitlePrefix(eventName);
         if (
           cleanedEvent &&
@@ -529,9 +566,9 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
             ? cleanedEvent
             : `${cleanedEvent} · ${hostName}`;
         } else {
-          computedTitle = `Saturación Crítica de Memoria RAM (>85%) · ${hostName}`;
+          computedTitle = `Saturación Crítica de Memoria RAM (>${ramUmbral}%) · ${hostName}`;
         }
-        defaultMensajeFalla = `Consumo de memoria RAM supera el umbral crítico del 85% en ${hostName}.`;
+        defaultMensajeFalla = `Consumo de memoria RAM supera el umbral crítico del ${ramUmbral}% en ${hostName}.`;
         computedTipoFalla = 'Hardware Aula / AIP';
       } else if (
         normEvent.includes('link down') ||
@@ -545,6 +582,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         normEvent.includes('tcp 10051') ||
         normEvent.includes('30s')
       ) {
+        matchedRuleId = 'network_disconnect';
         casoNumero = 1;
         casoNombre = 'Caso 1: Desconexión Física de Red (Disponibilidad / Red)';
         const cleanedEvent = cleanTitlePrefix(eventName);
@@ -566,9 +604,12 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         normEvent.includes('utilization') ||
         normEvent.includes('sobrecarga')
       ) {
+        matchedRuleId = 'cpu_overload';
+        const cpuRule = findRule('cpu_overload');
+        const cpuUmbral = cpuRule?.umbral ?? 95;
         casoNumero = 2;
         casoNombre = 'Caso 2: Sobrecarga de Procesador (Rendimiento / Telemetría)';
-        computedTitle = `Sobrecarga Crítica de Procesador CPU (>95%) · ${hostName}`;
+        computedTitle = `Sobrecarga Crítica de Procesador CPU (>${cpuUmbral}%) · ${hostName}`;
         defaultMensajeFalla = `Saturación crítica de CPU en ${hostName}.`;
         computedTipoFalla = 'Hardware Aula / AIP';
       } else if (
@@ -578,6 +619,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         normEvent.includes('servicio') ||
         normEvent.includes('agent service')
       ) {
+        matchedRuleId = 'agent_service_down';
         casoNumero = 3;
         casoNombre = 'Caso 3: Interrupción de Servicio Crítico (Estado de Agentes)';
         computedTitle = `Interrupción de Servicio Crítico del Agente de Monitoreo · ${hostName}`;
@@ -588,6 +630,20 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
         if (!clean) clean = `Incidencia automática en ${hostName}`;
         computedTitle = clean.includes(hostName) ? clean : `${clean} · ${hostName}`;
         defaultMensajeFalla = `Incidencia técnica detectada automáticamente en ${hostName}.`;
+      }
+
+      if (matchedRuleId) {
+        const activeRule = findRule(matchedRuleId);
+        if (activeRule && !activeRule.habilitada) {
+          return res.status(200).json({
+            status: 'success',
+            ignoredByRule: true,
+            message: `Evento recibido pero omitido porque la regla "${activeRule.nombre}" está deshabilitada por el administrador.`,
+          });
+        }
+        if (activeRule && rulesConfig.updatedBy !== 'Sistema EduDesk') {
+          computedPriority = activeRule.prioridad;
+        }
       }
 
       const mensajeBase = rawMensajeFalla || defaultMensajeFalla;

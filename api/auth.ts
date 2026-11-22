@@ -2,8 +2,11 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import {
   authenticateUser,
   claimInitialAdmin,
+  createUserByAdmin,
   getAuthStatus,
   getPublicTechnicians,
+  listUsersForAdmin,
+  UserRole,
   verifyBearerToken,
 } from './_auth';
 
@@ -23,6 +26,38 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(401).json({ success: false, error: 'Sesión no válida o expirada.' });
     }
     return res.status(200).json({ success: true, user });
+  }
+
+  // GET /api/auth/users (solo ADMIN)
+  if (req.method === 'GET' && (url.includes('/users') || action === 'users')) {
+    const user = verifyBearerToken(req.headers.authorization as string | undefined);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+    }
+    if (user.rol !== 'ADMIN') {
+      return res.status(403).json({ success: false, error: 'Solo el administrador puede gestionar usuarios.' });
+    }
+    return res.status(200).json({ success: true, users: listUsersForAdmin() });
+  }
+
+  // POST /api/auth/users (solo ADMIN)
+  if (req.method === 'POST' && (url.includes('/users') || action === 'users')) {
+    const user = verifyBearerToken(req.headers.authorization as string | undefined);
+    if (!user) {
+      return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+    }
+    if (user.rol !== 'ADMIN') {
+      return res.status(403).json({ success: false, error: 'Solo el administrador puede crear cuentas.' });
+    }
+    const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : req.body || {};
+    const result = createUserByAdmin({
+      username: body.username,
+      nombre: body.nombre,
+      email: body.email,
+      rol: body.rol as UserRole,
+      password: body.password,
+    });
+    return res.status(result.success ? 200 : 400).json(result);
   }
 
   // GET /api/technicians
