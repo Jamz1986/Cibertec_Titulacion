@@ -333,29 +333,82 @@ function saveBootstrapAccounts(accounts: StoredAccount[]) {
   }
 }
 
+const BASE_INSTITUTIONAL_ACCOUNTS: StoredAccount[] = [
+  {
+    id: 'sys-admin-rfonseca',
+    username: 'rfonseca',
+    email: 'rfonseca@cibertec.edu.pe',
+    nombre: 'Renzo Fonseca',
+    rol: 'ADMIN',
+    rolLabel: 'Administrador / Coordinador NOC',
+    institucionSede: 'Mesa de Ayuda TI - Sede Central',
+    ugel: 'Mesa de Ayuda',
+    departamento: 'Coordinación de Redes y Mesa de Ayuda',
+    cargo: 'Administrador de Red',
+    activo: true,
+    salt: 'c009d0661e557d957f6a10495f899113',
+    passwordHash:
+      '6c9d8a6c5ecc4b29b4bc08da2485b73932084927d881fbbf26014b9135c819957c7b74a683fb8f5c17f622cda205e77dd042d43de4e176ec437b1a7c36365da1',
+  },
+  {
+    id: 'sys-tecnico-lgranados',
+    username: 'lgranados',
+    email: 'lgranados@cibertec.edu.pe',
+    nombre: 'Leonardo Granados',
+    rol: 'TECNICO',
+    rolLabel: 'Especialista de Soporte Técnico TI',
+    institucionSede: 'Mesa de Ayuda TI - Soporte',
+    ugel: 'Mesa de Ayuda',
+    departamento: 'Soporte Técnico e Infraestructura',
+    cargo: 'Técnico Especialista TI',
+    activo: true,
+    salt: '6ab181a47af9096b8e4883fa751823f1',
+    passwordHash:
+      '03b25d4e3bb59a2ff28003391e37a04705e625d23a1ef20832215fdccb43ea58c9a32c51c9961acd6ea8dc4ad9003d43c73e0ed38911817397eb630421c7b753',
+  },
+];
+
 function getAllActiveAccounts(): { accounts: StoredAccount[]; configuredByEnv: boolean } {
   const envAccounts = loadEnvAccounts();
   const bootstrapAccounts = loadBootstrapAccounts();
-  if (envAccounts.length === 0) {
-    return { accounts: bootstrapAccounts, configuredByEnv: false };
+
+  // Combinar cuentas de entorno (prioridad) + cuentas institucionales base
+  const baseAccounts: StoredAccount[] = [...envAccounts];
+  const baseSeen = new Set(
+    baseAccounts.flatMap((a) => [a.username.toLowerCase(), a.email.toLowerCase()])
+  );
+  for (const sysAcc of BASE_INSTITUTIONAL_ACCOUNTS) {
+    if (
+      !baseSeen.has(sysAcc.username.toLowerCase()) &&
+      !baseSeen.has(sysAcc.email.toLowerCase())
+    ) {
+      baseAccounts.push(sysAcc);
+      baseSeen.add(sysAcc.username.toLowerCase());
+      baseSeen.add(sysAcc.email.toLowerCase());
+    }
   }
-  // Runtime modifications saved in bootstrapAccounts override matching env account by id or username
+
+  // Aplicar modificaciones y cuentas creadas en runtime
   const runtimeById = new Map(bootstrapAccounts.map((a) => [a.id, a]));
   const runtimeByUser = new Map(bootstrapAccounts.map((a) => [a.username.toLowerCase(), a]));
+  const runtimeByEmail = new Map(bootstrapAccounts.map((a) => [a.email.toLowerCase(), a]));
   const usedRuntimeIds = new Set<string>();
 
-  const merged: StoredAccount[] = envAccounts.map((envAcc) => {
-    const override = runtimeById.get(envAcc.id) || runtimeByUser.get(envAcc.username.toLowerCase());
+  const merged: StoredAccount[] = baseAccounts.map((baseAcc) => {
+    const override =
+      runtimeById.get(baseAcc.id) ||
+      runtimeByUser.get(baseAcc.username.toLowerCase()) ||
+      runtimeByEmail.get(baseAcc.email.toLowerCase());
     if (override) {
       usedRuntimeIds.add(override.id);
       return {
-        ...envAcc,
+        ...baseAcc,
         ...override,
-        salt: override.salt || envAcc.salt,
-        passwordHash: override.passwordHash || envAcc.passwordHash,
+        salt: override.salt || baseAcc.salt,
+        passwordHash: override.passwordHash || baseAcc.passwordHash,
       };
     }
-    return envAcc;
+    return baseAcc;
   });
 
   const seen = new Set(merged.flatMap((a) => [a.username.toLowerCase(), a.email.toLowerCase()]));
@@ -367,13 +420,15 @@ function getAllActiveAccounts(): { accounts: StoredAccount[]; configuredByEnv: b
       seen.add(acc.email.toLowerCase());
     }
   }
-  return { accounts: merged, configuredByEnv: true };
+  return { accounts: merged, configuredByEnv: envAccounts.length > 0 };
 }
 
 export function getAuthStatus() {
   const { accounts, configuredByEnv } = getAllActiveAccounts();
+  const hasAdmin = accounts.some((a) => a.rol === 'ADMIN');
   return {
-    needsSetup: accounts.length === 0,
+    needsSetup: !hasAdmin,
+    hasAdmin,
     configuredByEnv,
     accountCount: accounts.length,
   };
@@ -381,7 +436,10 @@ export function getAuthStatus() {
 
 export function listUsersForAdmin(): Array<PublicUser & { username: string; source: 'env' | 'runtime' }> {
   const envAccounts = loadEnvAccounts();
-  const envIds = new Set(envAccounts.map((a) => a.id));
+  const protectedIds = new Set([
+    ...envAccounts.map((a) => a.id),
+    ...BASE_INSTITUTIONAL_ACCOUNTS.map((a) => a.id),
+  ]);
   const { accounts } = getAllActiveAccounts();
   return accounts.map((a) => {
     const presence = getPresenceForAccount(a);
@@ -391,7 +449,7 @@ export function listUsersForAdmin(): Array<PublicUser & { username: string; sour
       conectado: presence.conectado,
       lastSeenAt: presence.lastSeenAt,
       activo: a.activo !== false,
-      source: envIds.has(a.id) ? 'env' : 'runtime',
+      source: protectedIds.has(a.id) ? 'env' : 'runtime',
     };
   });
 }
@@ -607,11 +665,14 @@ export function deleteUserByAdmin(
   }
 
   const envAccounts = loadEnvAccounts();
-  if (envAccounts.some((a) => a.id === cleanTargetId)) {
+  if (
+    envAccounts.some((a) => a.id === cleanTargetId) ||
+    BASE_INSTITUTIONAL_ACCOUNTS.some((a) => a.id === cleanTargetId)
+  ) {
     return {
       success: false,
       status: 400,
-      error: 'Las cuentas definidas por variables de entorno no se eliminan desde aquí; puede suspenderla o editar sus datos.',
+      error: 'Las cuentas institucionales principales no se eliminan desde aquí; puede suspenderla o editar sus datos.',
     };
   }
 
@@ -634,11 +695,12 @@ export function claimInitialAdmin(input: {
   email?: string;
   password: string;
 }): { success: boolean; error?: string; user?: PublicUser; token?: string } {
-  const { accounts, configuredByEnv } = getAllActiveAccounts();
-  if (configuredByEnv || accounts.length > 0) {
+  const { accounts } = getAllActiveAccounts();
+  const hasAdmin = accounts.some((a) => a.rol === 'ADMIN');
+  if (hasAdmin) {
     return {
       success: false,
-      error: 'La cuenta inicial ya fue configurada. Inicie sesión con sus credenciales.',
+      error: 'La cuenta administradora ya fue configurada. Inicie sesión con sus credenciales.',
     };
   }
 
@@ -672,7 +734,9 @@ export function claimInitialAdmin(input: {
     passwordHash: hash,
   };
 
-  saveBootstrapAccounts([account]);
+  const currentRuntime = loadBootstrapAccounts();
+  currentRuntime.push(account);
+  saveBootstrapAccounts(currentRuntime);
   const publicUser = toPublicUser(account);
   recordUserHeartbeat(publicUser);
   return {
@@ -702,7 +766,8 @@ export function registerSelfServiceUser(input: {
   }
 
   const { accounts } = getAllActiveAccounts();
-  if (rol === 'ADMIN' && accounts.length > 0) {
+  const hasAdmin = accounts.some((a) => a.rol === 'ADMIN');
+  if (rol === 'ADMIN' && hasAdmin) {
     return {
       success: false,
       status: 403,

@@ -35,18 +35,19 @@ export const LoginPortal: React.FC = () => {
     setIsSubmitting(true);
 
     try {
-      const result = needsSetup
-        ? await claimInitialAdmin({
-            username: identifier,
-            password,
-          })
-        : authMode === 'register'
-        ? await registerUser({
-            username: identifier,
-            rol: selectedRole,
-            password,
-          })
-        : await login(identifier, password);
+      const result =
+        authMode === 'register'
+          ? selectedRole === 'ADMIN' && needsSetup
+            ? await claimInitialAdmin({
+                username: identifier,
+                password,
+              })
+            : await registerUser({
+                username: identifier,
+                rol: selectedRole,
+                password,
+              })
+          : await login(identifier, password);
 
       if (!result.success) {
         setLoginError(result.error || 'Credenciales inválidas.');
@@ -145,7 +146,7 @@ export const LoginPortal: React.FC = () => {
               {/* Box Header */}
               <div className="flex items-center gap-3 pb-4 border-b border-slate-800">
                 <div className="w-10 h-10 rounded-xl bg-indigo-600 flex items-center justify-center font-bold text-white shadow-md shadow-indigo-600/30 shrink-0">
-                  {needsSetup || authMode === 'register' ? (
+                  {authMode === 'register' ? (
                     <UserPlus className="w-5 h-5" />
                   ) : (
                     <Lock className="w-5 h-5" />
@@ -153,24 +154,20 @@ export const LoginPortal: React.FC = () => {
                 </div>
                 <div>
                   <h2 className="text-base font-bold text-white">
-                    {needsSetup
-                      ? 'Configuración Inicial de Administrador'
-                      : authMode === 'register'
-                      ? 'Crear Acceso por Perfil'
+                    {authMode === 'register'
+                      ? 'Crear Perfil / Cuenta'
                       : 'Acceso al Sistema de Mesa de Ayuda'}
                   </h2>
                   <p className="text-xs text-slate-400">
-                    {needsSetup
-                      ? 'Ingrese el usuario y clave inicial para administrar EduDesk'
-                      : authMode === 'register'
-                      ? 'Registre su usuario para Técnico, Docente o Alumno'
-                      : 'Ingrese su usuario o correo y contraseña'}
+                    {authMode === 'register'
+                      ? 'Registre su usuario según su perfil para ingresar de inmediato'
+                      : 'Ingrese su usuario o correo institucional y contraseña'}
                   </p>
                 </div>
               </div>
 
-              {/* Simple mode switcher when system is already initialized */}
-              {!isAuthLoading && !needsSetup && (
+              {/* Mode switcher always visible on first load */}
+              {!isAuthLoading && (
                 <div className="grid grid-cols-2 gap-1.5 p-1 rounded-xl bg-slate-950 border border-slate-800 text-xs font-semibold">
                   <button
                     type="button"
@@ -217,7 +214,7 @@ export const LoginPortal: React.FC = () => {
                     </div>
                   )}
 
-                  {!needsSetup && authMode === 'register' && (
+                  {authMode === 'register' && (
                     <div>
                       <label className="block text-xs font-semibold text-slate-300 mb-1.5">
                         Perfil del Usuario
@@ -232,6 +229,9 @@ export const LoginPortal: React.FC = () => {
                           <option value="TECNICO">Técnico de Soporte TI (TECNICO)</option>
                           <option value="DOCENTE">Docente de Aula / AIP (DOCENTE)</option>
                           <option value="ALUMNO">Estudiante de Laboratorio (ALUMNO)</option>
+                          {needsSetup && (
+                            <option value="ADMIN">Administrador de Red (ADMIN)</option>
+                          )}
                         </select>
                       </div>
                     </div>
@@ -256,10 +256,10 @@ export const LoginPortal: React.FC = () => {
 
                   <div>
                     <label className="block text-xs font-semibold text-slate-300 mb-1.5">
-                      {needsSetup
-                        ? 'Contraseña Inicial (mín. 6 caracteres)'
-                        : authMode === 'register'
-                        ? 'Contraseña Nueva (mín. 4 caracteres)'
+                      {authMode === 'register'
+                        ? selectedRole === 'ADMIN' && needsSetup
+                          ? 'Contraseña Inicial (mín. 6 caracteres)'
+                          : 'Contraseña Nueva (mín. 4 caracteres)'
                         : 'Contraseña'}
                     </label>
                     <div className="relative">
@@ -286,7 +286,7 @@ export const LoginPortal: React.FC = () => {
                     type="submit"
                     disabled={isSubmitting}
                     className={`w-full py-3 px-4 rounded-xl ${
-                      authMode === 'register' && !needsSetup
+                      authMode === 'register'
                         ? 'bg-emerald-600 hover:bg-emerald-500 shadow-emerald-600/30'
                         : 'bg-indigo-600 hover:bg-indigo-500 shadow-indigo-600/30'
                     } disabled:opacity-60 text-white font-semibold text-xs transition-all shadow-md flex items-center justify-center gap-2 cursor-pointer mt-2`}
@@ -299,9 +299,7 @@ export const LoginPortal: React.FC = () => {
                     ) : (
                       <>
                         <span>
-                          {needsSetup
-                            ? 'Crear Administrador e Ingresar'
-                            : authMode === 'register'
+                          {authMode === 'register'
                             ? 'Crear Cuenta e Ingresar'
                             : 'Iniciar Sesión en EduDesk'}
                         </span>

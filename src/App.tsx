@@ -825,7 +825,7 @@ export default function App() {
               >
                 <div className="flex items-center gap-2.5">
                   <Users className="w-4 h-4 text-rose-600" />
-                  <span>Usuarios y Roles</span>
+                  <span>TÉCNICOS A DISPOSICIÓN</span>
                 </div>
                 <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
                   Admin

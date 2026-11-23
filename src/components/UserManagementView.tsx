@@ -418,7 +418,7 @@ export const UserManagementView: React.FC<UserManagementViewProps> = ({
           </div>
           <h1 className="text-lg font-bold text-slate-900 mt-1 flex items-center gap-2">
             <Users className="w-5 h-5 text-indigo-600" />
-            <span>Gestionar Usuarios y Roles</span>
+            <span>TÉCNICOS A DISPOSICIÓN</span>
           </h1>
           <p className="text-xs text-slate-500 mt-0.5 max-w-2xl">
             Registre, modifique y administre las cuentas del personal y usuarios. Supervise en tiempo real quién está conectado, qué ticket atiende cada técnico o si se encuentra libre, junto con su número de contacto.
