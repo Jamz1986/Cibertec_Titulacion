@@ -48,6 +48,7 @@ import {
   MapPin,
   Activity,
   UserCheck,
+  Users,
 } from 'lucide-react';
 import { EmergencyPhoneModal } from './components/EmergencyPhoneModal';
 import { LoginPortal } from './components/LoginPortal';
@@ -58,6 +59,7 @@ import { DistrictFailureDashboard } from './components/DistrictFailureDashboard'
 import { HostMonitorView } from './components/HostMonitorView';
 import { AssignedTicketsView } from './components/AssignedTicketsView';
 import { MonitoringRulesView } from './components/MonitoringRulesView';
+import { UserManagementView } from './components/UserManagementView';
 import { cleanAndEnrichTicket } from './utils/ticketCleaner';
 
 export default function App() {
@@ -76,6 +78,7 @@ export default function App() {
     | 'assigned'
     | 'hosts'
     | 'monitoring-rules'
+    | 'users-roles'
     | 'packet-tracer'
     | 'siniestros'
     | 'distritos-report'
@@ -219,7 +222,7 @@ export default function App() {
   // When switching role, align default view, alert state, and filtering
   React.useEffect(() => {
     setOnlyMyTickets(isGeneralUser);
-    if (!isAdmin && activeSection === 'monitoring-rules') {
+    if (!isAdmin && (activeSection === 'monitoring-rules' || activeSection === 'users-roles')) {
       setActiveSection('tickets');
     }
     if (!isTechnician && activeSection === 'assigned') {
@@ -232,7 +235,8 @@ export default function App() {
         activeSection === 'thesis' ||
         activeSection === 'hosts' ||
         activeSection === 'assigned' ||
-        activeSection === 'monitoring-rules'
+        activeSection === 'monitoring-rules' ||
+        activeSection === 'users-roles'
       ) {
         setActiveSection('tickets');
       }
@@ -807,25 +811,47 @@ export default function App() {
           )}
 
           {isAdmin && (
-            <button
-              onClick={() => {
-                setActiveSection('monitoring-rules');
-                setIsMobileMenuOpen(false);
-              }}
-              className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
-                activeSection === 'monitoring-rules'
-                  ? 'bg-rose-50 text-rose-700 font-bold border border-rose-200/70'
-                  : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <ShieldCheck className="w-4 h-4 text-rose-600" />
-                <span>Reglas de Monitoreo</span>
-              </div>
-              <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
-                Admin
-              </span>
-            </button>
+            <>
+              <button
+                onClick={() => {
+                  setActiveSection('users-roles');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+                  activeSection === 'users-roles'
+                    ? 'bg-rose-50 text-rose-700 font-bold border border-rose-200/70'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <Users className="w-4 h-4 text-rose-600" />
+                  <span>Usuarios y Roles</span>
+                </div>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
+                  Admin
+                </span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setActiveSection('monitoring-rules');
+                  setIsMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-xl transition-colors cursor-pointer ${
+                  activeSection === 'monitoring-rules'
+                    ? 'bg-rose-50 text-rose-700 font-bold border border-rose-200/70'
+                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900'
+                }`}
+              >
+                <div className="flex items-center gap-2.5">
+                  <ShieldCheck className="w-4 h-4 text-rose-600" />
+                  <span>Reglas de Monitoreo</span>
+                </div>
+                <span className="px-1.5 py-0.5 rounded text-[10px] font-bold bg-rose-100 text-rose-800">
+                  Admin
+                </span>
+              </button>
+            </>
           )}
 
           <button
@@ -1617,6 +1643,17 @@ export default function App() {
             <HostMonitorView
               token={token}
               onSelectTicket={(t) => setSelectedTicket(t)}
+            />
+          )}
+
+          {/* Section: Gestionar Usuarios y Roles (estrictamente solo ADMIN) */}
+          {activeSection === 'users-roles' && isAdmin && (
+            <UserManagementView
+              token={token}
+              currentUser={currentUser}
+              tickets={tickets}
+              onSelectTicket={(t) => setSelectedTicket(t)}
+              onUsersChanged={() => setTechniciansRefreshKey((k) => k + 1)}
             />
           )}
 

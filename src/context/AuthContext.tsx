@@ -59,6 +59,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  // Presencia en tiempo real: notifica al servidor mientras la sesión esté activa
+  useEffect(() => {
+    if (!token || !currentUser) return;
+    let active = true;
+    const sendHeartbeat = () => {
+      if (!active) return;
+      fetch('/api/auth/heartbeat', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      }).catch(() => {});
+    };
+    sendHeartbeat();
+    const timer = setInterval(sendHeartbeat, 25000);
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [token, currentUser?.id]);
+
   const login = async (identifier: string, password: string): Promise<AuthActionResult> => {
     const cleanId = identifier.trim();
     const cleanPass = password.trim();
@@ -152,6 +171,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    if (token) {
+      fetch('/api/auth/logout', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        keepalive: true,
+      }).catch(() => {});
+    }
     setCurrentUser(null);
     setToken(null);
   };

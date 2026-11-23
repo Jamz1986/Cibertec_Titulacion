@@ -14,6 +14,10 @@ export interface PublicUser {
   ugel: string;
   departamento: string;
   cargo: string;
+  telefono?: string;
+  activo?: boolean;
+  conectado?: boolean;
+  lastSeenAt?: string;
 }
 
 interface StoredAccount extends PublicUser {
@@ -23,7 +27,10 @@ interface StoredAccount extends PublicUser {
 }
 
 const BOOTSTRAP_FILE = path.join('/tmp', 'edudesk_bootstrap_auth.json');
+const PRESENCE_FILE = path.join('/tmp', 'edudesk_presence.json');
 const SESSION_KEY_FILE = path.join('/tmp', 'edudesk_session_secret.key');
+const PRESENCE_TTL_MS = 60 * 1000;
+const memoryPresence = new Map<string, { ts: number; formatted: string }>();
 
 let cachedSessionSecret: string | null = null;
 
@@ -97,6 +104,92 @@ function verifyPassword(password: string, salt: string, expectedHash: string): b
   return crypto.timingSafeEqual(derived, expectedBuf);
 }
 
+function formatLimaTimestamp(): string {
+  const formatter = new Intl.DateTimeFormat('es-PE', {
+    timeZone: 'America/Lima',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+  const parts = formatter.formatToParts(new Date());
+  const map: Record<string, string> = {};
+  for (const p of parts) map[p.type] = p.value;
+  return `${map.year}-${map.month}-${map.day} ${map.hour}:${map.minute}:${map.second} (GMT-5)`;
+}
+
+function loadPresenceMap(): Record<string, { ts: number; formatted: string }> {
+  const result: Record<string, { ts: number; formatted: string }> = {};
+  try {
+    if (fs.existsSync(PRESENCE_FILE)) {
+      const parsed = JSON.parse(fs.readFileSync(PRESENCE_FILE, 'utf-8'));
+      if (parsed && typeof parsed === 'object') {
+        Object.assign(result, parsed);
+      }
+    }
+  } catch {}
+  for (const [k, v] of memoryPresence.entries()) {
+    if (!result[k] || v.ts > result[k].ts) {
+      result[k] = v;
+    }
+  }
+  return result;
+}
+
+function savePresenceMap(map: Record<string, { ts: number; formatted: string }>) {
+  try {
+    fs.writeFileSync(PRESENCE_FILE, JSON.stringify(map), 'utf-8');
+  } catch {}
+}
+
+export function recordUserHeartbeat(user: { id: string; email?: string }): {
+  conectado: boolean;
+  lastSeenAt: string;
+} {
+  const now = Date.now();
+  const formatted = formatLimaTimestamp();
+  const entry = { ts: now, formatted };
+  const map = loadPresenceMap();
+  map[user.id] = entry;
+  memoryPresence.set(user.id, entry);
+  if (user.email) {
+    const emailKey = user.email.toLowerCase();
+    map[emailKey] = entry;
+    memoryPresence.set(emailKey, entry);
+  }
+  savePresenceMap(map);
+  return { conectado: true, lastSeenAt: formatted };
+}
+
+export function clearUserPresence(user: { id: string; email?: string }): void {
+  const map = loadPresenceMap();
+  delete map[user.id];
+  memoryPresence.delete(user.id);
+  if (user.email) {
+    const emailKey = user.email.toLowerCase();
+    delete map[emailKey];
+    memoryPresence.delete(emailKey);
+  }
+  savePresenceMap(map);
+}
+
+function getPresenceForAccount(acc: { id: string; email: string }): {
+  conectado: boolean;
+  lastSeenAt?: string;
+} {
+  const map = loadPresenceMap();
+  const rec = map[acc.id] || map[acc.email.toLowerCase()];
+  if (!rec) return { conectado: false };
+  const isOnline = Date.now() - rec.ts <= PRESENCE_TTL_MS;
+  return {
+    conectado: isOnline,
+    lastSeenAt: rec.formatted,
+  };
+}
+
 function defaultRoleMeta(rol: UserRole) {
   switch (rol) {
     case 'ADMIN':
@@ -160,6 +253,8 @@ function loadEnvAccounts(): StoredAccount[] {
               ugel: 'Mesa de Ayuda',
               departamento: item?.departamento || meta.departamento,
               cargo: item?.cargo || meta.cargo,
+              telefono: item?.telefono ? String(item.telefono).trim() : undefined,
+              activo: item?.activo !== false,
               salt,
               passwordHash: hash,
             });
@@ -172,11 +267,11 @@ function loadEnvAccounts(): StoredAccount[] {
   }
 
   // 2. Individual role env vars: AUTH_<ROLE>_USER / AUTH_<ROLE>_PASSWORD
-  const rolePairs: Array<{ role: UserRole; userKey: string; passKey: string; nameKey: string; emailKey: string }> = [
-    { role: 'ADMIN', userKey: 'AUTH_ADMIN_USER', passKey: 'AUTH_ADMIN_PASSWORD', nameKey: 'AUTH_ADMIN_NAME', emailKey: 'AUTH_ADMIN_EMAIL' },
-    { role: 'TECNICO', userKey: 'AUTH_TECNICO_USER', passKey: 'AUTH_TECNICO_PASSWORD', nameKey: 'AUTH_TECNICO_NAME', emailKey: 'AUTH_TECNICO_EMAIL' },
-    { role: 'DOCENTE', userKey: 'AUTH_DOCENTE_USER', passKey: 'AUTH_DOCENTE_PASSWORD', nameKey: 'AUTH_DOCENTE_NAME', emailKey: 'AUTH_DOCENTE_EMAIL' },
-    { role: 'ALUMNO', userKey: 'AUTH_ALUMNO_USER', passKey: 'AUTH_ALUMNO_PASSWORD', nameKey: 'AUTH_ALUMNO_NAME', emailKey: 'AUTH_ALUMNO_EMAIL' },
+  const rolePairs: Array<{ role: UserRole; userKey: string; passKey: string; nameKey: string; emailKey: string; phoneKey: string }> = [
+    { role: 'ADMIN', userKey: 'AUTH_ADMIN_USER', passKey: 'AUTH_ADMIN_PASSWORD', nameKey: 'AUTH_ADMIN_NAME', emailKey: 'AUTH_ADMIN_EMAIL', phoneKey: 'AUTH_ADMIN_PHONE' },
+    { role: 'TECNICO', userKey: 'AUTH_TECNICO_USER', passKey: 'AUTH_TECNICO_PASSWORD', nameKey: 'AUTH_TECNICO_NAME', emailKey: 'AUTH_TECNICO_EMAIL', phoneKey: 'AUTH_TECNICO_PHONE' },
+    { role: 'DOCENTE', userKey: 'AUTH_DOCENTE_USER', passKey: 'AUTH_DOCENTE_PASSWORD', nameKey: 'AUTH_DOCENTE_NAME', emailKey: 'AUTH_DOCENTE_EMAIL', phoneKey: 'AUTH_DOCENTE_PHONE' },
+    { role: 'ALUMNO', userKey: 'AUTH_ALUMNO_USER', passKey: 'AUTH_ALUMNO_PASSWORD', nameKey: 'AUTH_ALUMNO_NAME', emailKey: 'AUTH_ALUMNO_EMAIL', phoneKey: 'AUTH_ALUMNO_PHONE' },
   ];
 
   for (const cfg of rolePairs) {
@@ -192,6 +287,9 @@ function loadEnvAccounts(): StoredAccount[] {
       const nombre = !isPlaceholder(process.env[cfg.nameKey])
         ? String(process.env[cfg.nameKey]).trim()
         : username;
+      const telefono = !isPlaceholder(process.env[cfg.phoneKey])
+        ? String(process.env[cfg.phoneKey]).trim()
+        : undefined;
       const { salt, hash } = hashPassword(String(p));
       const meta = defaultRoleMeta(cfg.role);
       accounts.push({
@@ -205,6 +303,8 @@ function loadEnvAccounts(): StoredAccount[] {
         ugel: 'Mesa de Ayuda',
         departamento: meta.departamento,
         cargo: meta.cargo,
+        telefono,
+        activo: true,
         salt,
         passwordHash: hash,
       });
@@ -239,12 +339,28 @@ function getAllActiveAccounts(): { accounts: StoredAccount[]; configuredByEnv: b
   if (envAccounts.length === 0) {
     return { accounts: bootstrapAccounts, configuredByEnv: false };
   }
-  // Merge env accounts with runtime-created accounts (env takes precedence on conflicts)
-  const seen = new Set(
-    envAccounts.flatMap((a) => [a.username.toLowerCase(), a.email.toLowerCase()])
-  );
-  const merged = [...envAccounts];
+  // Runtime modifications saved in bootstrapAccounts override matching env account by id or username
+  const runtimeById = new Map(bootstrapAccounts.map((a) => [a.id, a]));
+  const runtimeByUser = new Map(bootstrapAccounts.map((a) => [a.username.toLowerCase(), a]));
+  const usedRuntimeIds = new Set<string>();
+
+  const merged: StoredAccount[] = envAccounts.map((envAcc) => {
+    const override = runtimeById.get(envAcc.id) || runtimeByUser.get(envAcc.username.toLowerCase());
+    if (override) {
+      usedRuntimeIds.add(override.id);
+      return {
+        ...envAcc,
+        ...override,
+        salt: override.salt || envAcc.salt,
+        passwordHash: override.passwordHash || envAcc.passwordHash,
+      };
+    }
+    return envAcc;
+  });
+
+  const seen = new Set(merged.flatMap((a) => [a.username.toLowerCase(), a.email.toLowerCase()]));
   for (const acc of bootstrapAccounts) {
+    if (usedRuntimeIds.has(acc.id)) continue;
     if (!seen.has(acc.username.toLowerCase()) && !seen.has(acc.email.toLowerCase())) {
       merged.push(acc);
       seen.add(acc.username.toLowerCase());
@@ -267,17 +383,25 @@ export function listUsersForAdmin(): Array<PublicUser & { username: string; sour
   const envAccounts = loadEnvAccounts();
   const envIds = new Set(envAccounts.map((a) => a.id));
   const { accounts } = getAllActiveAccounts();
-  return accounts.map((a) => ({
-    ...toPublicUser(a),
-    username: a.username,
-    source: envIds.has(a.id) ? 'env' : 'runtime',
-  }));
+  return accounts.map((a) => {
+    const presence = getPresenceForAccount(a);
+    return {
+      ...toPublicUser(a),
+      username: a.username,
+      conectado: presence.conectado,
+      lastSeenAt: presence.lastSeenAt,
+      activo: a.activo !== false,
+      source: envIds.has(a.id) ? 'env' : 'runtime',
+    };
+  });
 }
 
 export function createUserByAdmin(input: {
   username: string;
   nombre?: string;
   email?: string;
+  telefono?: string;
+  cargo?: string;
   rol: UserRole;
   password: string;
 }): { success: boolean; error?: string; user?: PublicUser & { username: string } } {
@@ -299,6 +423,7 @@ export function createUserByAdmin(input: {
     String(input.email || '').trim() ||
     (username.includes('@') ? username : `${username}@edudesk.edu.pe`);
   const nombre = String(input.nombre || '').trim() || username;
+  const telefono = String(input.telefono || '').trim() || undefined;
 
   const { accounts } = getAllActiveAccounts();
   const exists = accounts.some(
@@ -322,7 +447,9 @@ export function createUserByAdmin(input: {
     institucionSede: meta.institucionSede,
     ugel: 'Mesa de Ayuda',
     departamento: meta.departamento,
-    cargo: meta.cargo,
+    cargo: String(input.cargo || '').trim() || meta.cargo,
+    telefono,
+    activo: true,
     salt,
     passwordHash: hash,
   };
@@ -338,6 +465,167 @@ export function createUserByAdmin(input: {
       username: newAccount.username,
     },
   };
+}
+
+export function updateUserByAdmin(
+  actorUserId: string,
+  input: {
+    id: string;
+    nombre?: string;
+    email?: string;
+    telefono?: string;
+    cargo?: string;
+    rol?: UserRole;
+    activo?: boolean;
+    password?: string;
+  }
+): { success: boolean; status?: number; error?: string; user?: PublicUser & { username: string } } {
+  const targetId = String(input.id || '').trim();
+  if (!targetId) {
+    return { success: false, status: 400, error: 'Debe indicar el ID de la cuenta a modificar.' };
+  }
+
+  const { accounts } = getAllActiveAccounts();
+  const existing = accounts.find((a) => a.id === targetId);
+  if (!existing) {
+    return { success: false, status: 404, error: 'Cuenta de usuario no encontrada.' };
+  }
+
+  const nextRol = input.rol
+    ? (String(input.rol).toUpperCase() as UserRole)
+    : existing.rol;
+
+  if (!['ADMIN', 'TECNICO', 'DOCENTE', 'ALUMNO'].includes(nextRol)) {
+    return { success: false, status: 400, error: 'Rol inválido.' };
+  }
+
+  const nextActivo = typeof input.activo === 'boolean' ? input.activo : existing.activo !== false;
+
+  if (existing.id === actorUserId && nextRol !== 'ADMIN') {
+    return {
+      success: false,
+      status: 400,
+      error: 'No puede cambiar su propio rol de Administrador mientras mantiene la sesión activa.',
+    };
+  }
+  if (existing.id === actorUserId && !nextActivo) {
+    return {
+      success: false,
+      status: 400,
+      error: 'No puede suspender su propia cuenta mientras mantiene la sesión activa.',
+    };
+  }
+
+  const nextNombre = input.nombre !== undefined ? String(input.nombre).trim() : existing.nombre;
+  if (nextNombre.length < 2) {
+    return { success: false, status: 400, error: 'El nombre debe tener al menos 2 caracteres.' };
+  }
+
+  const nextEmail = input.email !== undefined ? String(input.email).trim() : existing.email;
+  if (!nextEmail || !nextEmail.includes('@')) {
+    return { success: false, status: 400, error: 'Ingrese un correo institucional válido.' };
+  }
+
+  const duplicateEmail = accounts.some(
+    (a) => a.id !== existing.id && a.email.toLowerCase() === nextEmail.toLowerCase()
+  );
+  if (duplicateEmail) {
+    return { success: false, status: 409, error: 'Ese correo ya está en uso por otra cuenta.' };
+  }
+
+  let nextSalt = existing.salt;
+  let nextHash = existing.passwordHash;
+  if (input.password !== undefined && String(input.password).trim() !== '') {
+    const cleanPass = String(input.password).trim();
+    if (cleanPass.length < 6) {
+      return { success: false, status: 400, error: 'La nueva contraseña debe tener al menos 6 caracteres.' };
+    }
+    const hashed = hashPassword(cleanPass);
+    nextSalt = hashed.salt;
+    nextHash = hashed.hash;
+  }
+
+  const meta = defaultRoleMeta(nextRol);
+  const rolChanged = nextRol !== existing.rol;
+
+  const updatedAccount: StoredAccount = {
+    ...existing,
+    nombre: nextNombre,
+    email: nextEmail,
+    rol: nextRol,
+    rolLabel: rolChanged ? meta.rolLabel : existing.rolLabel,
+    departamento: rolChanged ? meta.departamento : existing.departamento,
+    cargo:
+      input.cargo !== undefined && String(input.cargo).trim() !== ''
+        ? String(input.cargo).trim()
+        : rolChanged
+        ? meta.cargo
+        : existing.cargo,
+    telefono:
+      input.telefono !== undefined
+        ? String(input.telefono).trim() || undefined
+        : existing.telefono,
+    activo: nextActivo,
+    salt: nextSalt,
+    passwordHash: nextHash,
+  };
+
+  const currentRuntime = loadBootstrapAccounts();
+  const idx = currentRuntime.findIndex(
+    (a) => a.id === updatedAccount.id || a.username.toLowerCase() === updatedAccount.username.toLowerCase()
+  );
+  if (idx !== -1) {
+    currentRuntime[idx] = updatedAccount;
+  } else {
+    currentRuntime.push(updatedAccount);
+  }
+  saveBootstrapAccounts(currentRuntime);
+
+  const presence = getPresenceForAccount(updatedAccount);
+  return {
+    success: true,
+    status: 200,
+    user: {
+      ...toPublicUser(updatedAccount),
+      username: updatedAccount.username,
+      conectado: presence.conectado,
+      lastSeenAt: presence.lastSeenAt,
+    },
+  };
+}
+
+export function deleteUserByAdmin(
+  actorUserId: string,
+  targetId: string
+): { success: boolean; status?: number; error?: string } {
+  const cleanTargetId = String(targetId || '').trim();
+  if (!cleanTargetId) {
+    return { success: false, status: 400, error: 'Debe indicar el ID de la cuenta.' };
+  }
+  if (cleanTargetId === actorUserId) {
+    return { success: false, status: 400, error: 'No puede eliminar su propia cuenta activa.' };
+  }
+
+  const envAccounts = loadEnvAccounts();
+  if (envAccounts.some((a) => a.id === cleanTargetId)) {
+    return {
+      success: false,
+      status: 400,
+      error: 'Las cuentas definidas por variables de entorno no se eliminan desde aquí; puede suspenderla o editar sus datos.',
+    };
+  }
+
+  const currentRuntime = loadBootstrapAccounts();
+  const target = currentRuntime.find((a) => a.id === cleanTargetId);
+  if (!target) {
+    return { success: false, status: 404, error: 'Cuenta no encontrada.' };
+  }
+
+  const remaining = currentRuntime.filter((a) => a.id !== cleanTargetId);
+  saveBootstrapAccounts(remaining);
+  clearUserPresence(target);
+
+  return { success: true, status: 200 };
 }
 
 export function claimInitialAdmin(input: {
@@ -379,12 +667,14 @@ export function claimInitialAdmin(input: {
     ugel: 'Mesa de Ayuda',
     departamento: meta.departamento,
     cargo: meta.cargo,
+    activo: true,
     salt,
     passwordHash: hash,
   };
 
   saveBootstrapAccounts([account]);
   const publicUser = toPublicUser(account);
+  recordUserHeartbeat(publicUser);
   return {
     success: true,
     user: publicUser,
@@ -447,6 +737,7 @@ export function registerSelfServiceUser(input: {
     ugel: 'Mesa de Ayuda',
     departamento: meta.departamento,
     cargo: meta.cargo,
+    activo: true,
     salt,
     passwordHash: hash,
   };
@@ -456,6 +747,7 @@ export function registerSelfServiceUser(input: {
   saveBootstrapAccounts(currentRuntime);
 
   const publicUser = toPublicUser(newAccount);
+  recordUserHeartbeat(publicUser);
   return {
     success: true,
     status: 200,
@@ -497,7 +789,15 @@ export function authenticateUser(
     };
   }
 
+  if (found.activo === false) {
+    return {
+      success: false,
+      error: 'Esta cuenta se encuentra suspendida por el Administrador de Red.',
+    };
+  }
+
   const publicUser = toPublicUser(found);
+  recordUserHeartbeat(publicUser);
   return {
     success: true,
     user: publicUser,
@@ -516,6 +816,8 @@ function toPublicUser(acc: StoredAccount): PublicUser {
     ugel: acc.ugel,
     departamento: acc.departamento,
     cargo: acc.cargo,
+    telefono: acc.telefono,
+    activo: acc.activo !== false,
   };
 }
 
@@ -557,14 +859,26 @@ export function verifyBearerToken(authHeader?: string): PublicUser | null {
   }
 }
 
-export function getPublicTechnicians(): Array<{ id: string; nombre: string; rol: UserRole; cargo: string }> {
+export function getPublicTechnicians(): Array<{
+  id: string;
+  nombre: string;
+  rol: UserRole;
+  cargo: string;
+  telefono?: string;
+  conectado: boolean;
+}> {
   const { accounts } = getAllActiveAccounts();
   return accounts
-    .filter((a) => a.rol === 'TECNICO' || a.rol === 'ADMIN')
-    .map((a) => ({
-      id: a.id,
-      nombre: a.nombre,
-      rol: a.rol,
-      cargo: a.cargo,
-    }));
+    .filter((a) => (a.rol === 'TECNICO' || a.rol === 'ADMIN') && a.activo !== false)
+    .map((a) => {
+      const presence = getPresenceForAccount(a);
+      return {
+        id: a.id,
+        nombre: a.nombre,
+        rol: a.rol,
+        cargo: a.cargo,
+        telefono: a.telefono,
+        conectado: presence.conectado,
+      };
+    });
 }

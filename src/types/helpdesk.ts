@@ -50,6 +50,10 @@ export interface AppUser {
   ugel: UGELCode;
   departamento: string;
   cargo: string;
+  telefono?: string;
+  activo?: boolean;
+  conectado?: boolean;
+  lastSeenAt?: string;
 }
 
 export interface PriorityConfig {

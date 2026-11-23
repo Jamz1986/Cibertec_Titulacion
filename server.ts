@@ -9,11 +9,15 @@ import util from 'util';
 import {
   authenticateUser,
   claimInitialAdmin,
+  clearUserPresence,
   createUserByAdmin,
+  deleteUserByAdmin,
   getAuthStatus,
   getPublicTechnicians,
   listUsersForAdmin,
+  recordUserHeartbeat,
   registerSelfServiceUser,
+  updateUserByAdmin,
   UserRole,
   verifyBearerToken,
 } from './api/_auth.js';
@@ -902,6 +906,23 @@ app.get('/api/auth/me', (req, res) => {
   return res.json({ success: true, user });
 });
 
+app.post('/api/auth/heartbeat', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  const presence = recordUserHeartbeat(user);
+  return res.json({ success: true, ...presence });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (user) {
+    clearUserPresence(user);
+  }
+  return res.json({ success: true });
+});
+
 app.get('/api/auth/users', (req, res) => {
   const user = verifyBearerToken(req.headers.authorization);
   if (!user) {
@@ -925,11 +946,56 @@ app.post('/api/auth/users', (req, res) => {
     username: req.body?.username,
     nombre: req.body?.nombre,
     email: req.body?.email,
+    telefono: req.body?.telefono,
+    cargo: req.body?.cargo,
     rol: req.body?.rol as UserRole,
     password: req.body?.password,
   });
   return res.status(result.success ? 200 : 400).json(result);
 });
+
+const handleUpdateUser = (req: express.Request, res: express.Response) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  if (user.rol !== 'ADMIN') {
+    return res.status(403).json({ success: false, error: 'Solo el administrador puede modificar cuentas.' });
+  }
+  const targetId = String(req.params.id || req.query?.id || req.body?.id || '').trim();
+  const result = updateUserByAdmin(user.id, {
+    id: targetId,
+    nombre: req.body?.nombre,
+    email: req.body?.email,
+    telefono: req.body?.telefono,
+    cargo: req.body?.cargo,
+    rol: req.body?.rol as UserRole | undefined,
+    activo: typeof req.body?.activo === 'boolean' ? req.body.activo : undefined,
+    password: req.body?.password,
+  });
+  return res.status(result.status || (result.success ? 200 : 400)).json(result);
+};
+
+app.patch('/api/auth/users', handleUpdateUser);
+app.patch('/api/auth/users/:id', handleUpdateUser);
+app.put('/api/auth/users', handleUpdateUser);
+app.put('/api/auth/users/:id', handleUpdateUser);
+
+const handleDeleteUser = (req: express.Request, res: express.Response) => {
+  const user = verifyBearerToken(req.headers.authorization);
+  if (!user) {
+    return res.status(401).json({ success: false, error: 'Se requiere autenticación.' });
+  }
+  if (user.rol !== 'ADMIN') {
+    return res.status(403).json({ success: false, error: 'Solo el administrador puede eliminar cuentas.' });
+  }
+  const targetId = String(req.params.id || req.query?.id || req.body?.id || '').trim();
+  const result = deleteUserByAdmin(user.id, targetId);
+  return res.status(result.status || (result.success ? 200 : 400)).json(result);
+};
+
+app.delete('/api/auth/users', handleDeleteUser);
+app.delete('/api/auth/users/:id', handleDeleteUser);
 
 app.get('/api/technicians', (req, res) => {
   const user = verifyBearerToken(req.headers.authorization);

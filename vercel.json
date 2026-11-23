@@ -22,6 +22,18 @@
       "destination": "/api/auth?action=me"
     },
     {
+      "source": "/api/auth/heartbeat",
+      "destination": "/api/auth?action=heartbeat"
+    },
+    {
+      "source": "/api/auth/logout",
+      "destination": "/api/auth?action=logout"
+    },
+    {
+      "source": "/api/auth/users/:id",
+      "destination": "/api/auth?action=users&id=:id"
+    },
+    {
       "source": "/api/auth/users",
       "destination": "/api/auth?action=users"
     },
